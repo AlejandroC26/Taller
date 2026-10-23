@@ -32,7 +32,7 @@ function NuevoCliente({ alCrear }: { alCrear: (c: Cliente) => void }) {
   return (
     <Tarjeta className="mb-40">
       <form onSubmit={enviar} className="grid gap-16 sm:grid-cols-2 lg:grid-cols-3">
-        <h2 className="text-heading sm:col-span-2 lg:col-span-3">Registrar cliente</h2>
+        <h2 className="text-subheading sm:col-span-2 lg:col-span-3">Registrar cliente</h2>
         <Entrada etiqueta="Nombre" {...campo('nombre')} required />
         <Entrada etiqueta="Apellido" {...campo('apellido')} required />
         <Entrada etiqueta="Documento" {...campo('documento')} required />
@@ -40,7 +40,7 @@ function NuevoCliente({ alCrear }: { alCrear: (c: Cliente) => void }) {
         <Entrada etiqueta="Correo" type="email" {...campo('correo')} />
         <Entrada etiqueta="Dirección" {...campo('direccion')} />
         <div className="flex items-center gap-16 sm:col-span-2 lg:col-span-3">
-          <Boton type="submit" variante="tinta" disabled={ocupado}>
+          <Boton type="submit" variante="primario" disabled={ocupado}>
             Registrar cliente
           </Boton>
           {error && <Aviso>{error}</Aviso>}
@@ -58,7 +58,7 @@ function NuevoVehiculo({ cliente, alCrear }: { cliente: Cliente; alCrear: () => 
 
   return (
     <form
-      className="mt-16 grid gap-16 border-t border-carbon-lift pt-16 sm:grid-cols-3"
+      className="mt-16 grid gap-16 border-t border-borde pt-16 sm:grid-cols-3"
       onSubmit={async (e) => {
         e.preventDefault();
         const r = await ejecutar(() =>
@@ -70,12 +70,12 @@ function NuevoVehiculo({ cliente, alCrear }: { cliente: Cliente; alCrear: () => 
         if (r) alCrear();
       }}
     >
-      <Entrada sobre="oscuro" etiqueta="Placa" {...campo('placa')} required />
-      <Entrada sobre="oscuro" etiqueta="Marca" {...campo('marca')} required />
-      <Entrada sobre="oscuro" etiqueta="Modelo" {...campo('modelo')} required />
-      <Entrada sobre="oscuro" etiqueta="Año" type="number" {...campo('anio')} required />
-      <Entrada sobre="oscuro" etiqueta="Color" {...campo('color')} />
-      <Entrada sobre="oscuro" etiqueta="Kilometraje" type="number" min={0} {...campo('kilometraje')} />
+      <Entrada etiqueta="Placa" {...campo('placa')} required />
+      <Entrada etiqueta="Marca" {...campo('marca')} required />
+      <Entrada etiqueta="Modelo" {...campo('modelo')} required />
+      <Entrada etiqueta="Año" type="number" {...campo('anio')} required />
+      <Entrada etiqueta="Color" {...campo('color')} />
+      <Entrada etiqueta="Kilometraje" type="number" min={0} {...campo('kilometraje')} />
       <div className="flex items-center gap-16 sm:col-span-3">
         <Boton type="submit" disabled={ocupado}>
           Agregar vehículo
@@ -97,7 +97,7 @@ export function Clientes() {
     <>
       <Encabezado ceja="Recepción" titulo="Clientes y vehículos">
         {!creando && (
-          <Boton variante="claro" onClick={() => setCreando(true)}>
+          <Boton variante="primario" onClick={() => setCreando(true)}>
             Nuevo cliente
           </Boton>
         )}
@@ -118,7 +118,7 @@ export function Clientes() {
           setBuscar(texto.trim());
         }}
       >
-        <Entrada sobre="oscuro" etiqueta="Buscar" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Nombre, documento o placa" />
+        <Entrada etiqueta="Buscar" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Nombre, documento o placa" />
         <Boton type="submit">Buscar</Boton>
       </form>
       {error && <Aviso>{error}</Aviso>}
@@ -134,29 +134,29 @@ export function Clientes() {
                     <p className="text-body">
                       {c.nombre} {c.apellido}
                     </p>
-                    <p className="text-body-sm text-warm-granite">
+                    <p className="text-body-sm text-texto-2">
                       {c.documento} · {c.telefono}
                       {c.correo ? ` · ${c.correo}` : ''}
                     </p>
                   </div>
-                  <Boton variante="fantasma" onClick={() => setAgregando(agregando === c.id ? null : c.id)}>
+                  <Boton variante="contorno" onClick={() => setAgregando(agregando === c.id ? null : c.id)}>
                     {agregando === c.id ? 'Cerrar' : '+ Vehículo'}
                   </Boton>
                 </div>
                 <ul className="mt-16 flex flex-col">
                   {(c.vehiculos ?? []).map((v) => (
-                    <li key={v.id} className="flex flex-wrap items-center justify-between gap-8 border-t border-carbon-lift py-12 text-body-sm">
+                    <li key={v.id} className="flex flex-wrap items-center justify-between gap-8 border-t border-borde py-12 text-body-sm">
                       <span>
                         <span className="mono mr-8">{v.placa}</span>
                         {v.marca} {v.modelo} {v.anio}
                       </span>
-                      <span className="flex items-center gap-16 text-warm-granite">
+                      <span className="flex items-center gap-16 text-texto-2">
                         {numero(v.kilometraje)} km
                         {v.origen === 'concesionario' && <Etiqueta>Concesionario</Etiqueta>}
                       </span>
                     </li>
                   ))}
-                  {(c.vehiculos ?? []).length === 0 && <li className="text-body-sm text-warm-granite">Sin vehículos registrados</li>}
+                  {(c.vehiculos ?? []).length === 0 && <li className="text-body-sm text-texto-2">Sin vehículos registrados</li>}
                 </ul>
                 {agregando === c.id && (
                   <NuevoVehiculo
@@ -170,7 +170,7 @@ export function Clientes() {
               </Contorno>
             </li>
           ))}
-          {(datos ?? []).length === 0 && <li className="text-warm-granite">No hay clientes con esa búsqueda.</li>}
+          {(datos ?? []).length === 0 && <li className="text-texto-2">No hay clientes con esa búsqueda.</li>}
         </ul>
       )}
     </>

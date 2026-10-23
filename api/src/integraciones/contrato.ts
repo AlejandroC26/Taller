@@ -16,7 +16,7 @@ export const CONTRATO: Record<Destino, { descripcion: string; herramientas: Reco
     descripcion: 'Proyecto de facturación: emite la factura de la reparación',
     herramientas: {
       emitir_factura:
-        '{ orden, cliente{documento,nombre,correo,telefono}, vehiculo{placa,marca,modelo}, origen, lineas[{concepto,cantidad,valor_unitario}], total } → número de factura',
+        '{ taller, orden, cliente{documento,nombre,correo,telefono}, vehiculo{placa,marca,modelo}, origen, lineas[{concepto,cantidad,valor_unitario}], total } → número de factura',
     },
   },
   concesionario: {

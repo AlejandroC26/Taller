@@ -8,7 +8,7 @@ import { aNumero, Entrada, Seleccion } from '../componentes/Campos';
 import { Etiqueta } from '../componentes/Etiqueta';
 import { Aviso, Cargando, Encabezado, Tarjeta } from '../componentes/Superficies';
 import { Celda, Fila, Tabla } from '../componentes/Tabla';
-import { pesos } from '../logica/formato';
+import { cuenta, pesos } from '../logica/formato';
 import { puede } from '../logica/permisos';
 import { usarAccion, usarDatos } from '../logica/usarDatos';
 import { usarSesion } from '../sesion/sesion';
@@ -36,7 +36,7 @@ function NuevoItem({ categorias, alCrear }: { categorias: Categoria[]; alCrear: 
   return (
     <Tarjeta className="mb-40">
       <form onSubmit={enviar} className="grid gap-16 sm:grid-cols-2 lg:grid-cols-6">
-        <h2 className="text-heading sm:col-span-2 lg:col-span-6">Nuevo ítem</h2>
+        <h2 className="text-subheading sm:col-span-2 lg:col-span-6">Nuevo ítem</h2>
         <Entrada etiqueta="Código" {...campo('codigo')} placeholder="FIL-ACE-02" required />
         <div className="lg:col-span-2">
           <Entrada etiqueta="Ítem" {...campo('nombre')} required />
@@ -53,7 +53,7 @@ function NuevoItem({ categorias, alCrear }: { categorias: Categoria[]; alCrear: 
           ))}
         </Seleccion>
         <div className="flex items-end gap-16 sm:col-span-2 lg:col-span-5">
-          <Boton type="submit" variante="tinta" disabled={ocupado}>
+          <Boton type="submit" variante="primario" disabled={ocupado}>
             Crear ítem
           </Boton>
           {error && <Aviso>{error}</Aviso>}
@@ -82,13 +82,13 @@ function EditarItem({ item, alCambiar }: { item: Item; alCambiar: () => void }) 
           if (r) alCambiar();
         }}
       >
-        <Seleccion sobre="oscuro" etiqueta="Movimiento" value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)}>
+        <Seleccion etiqueta="Movimiento" value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)}>
           <option value="entrada">Entrada</option>
           <option value="salida">Salida</option>
           <option value="ajuste">Ajuste (conteo)</option>
         </Seleccion>
-        <Entrada sobre="oscuro" etiqueta={tipo === 'ajuste' ? 'Conteo físico' : 'Cantidad'} type="number" min={0} value={cantidad} onChange={(e) => setCantidad(e.target.value)} required />
-        <Entrada sobre="oscuro" etiqueta="Nota" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Factura, motivo…" />
+        <Entrada etiqueta={tipo === 'ajuste' ? 'Conteo físico' : 'Cantidad'} type="number" min={0} value={cantidad} onChange={(e) => setCantidad(e.target.value)} required />
+        <Entrada etiqueta="Nota" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Factura, motivo…" />
         <Boton type="submit" disabled={ocupado} className="sm:col-span-3 sm:justify-self-start">
           Registrar movimiento
         </Boton>
@@ -101,9 +101,9 @@ function EditarItem({ item, alCambiar }: { item: Item; alCambiar: () => void }) 
           if (r) alCambiar();
         }}
       >
-        <Entrada sobre="oscuro" etiqueta="Precio" type="number" min={0} value={precio} onChange={(e) => setPrecio(e.target.value)} />
-        <Entrada sobre="oscuro" etiqueta="Nivel de alerta" type="number" min={0} value={nivel} onChange={(e) => setNivel(e.target.value)} />
-        <Boton type="submit" variante="fantasma" disabled={ocupado} className="sm:col-span-2 sm:justify-self-start">
+        <Entrada etiqueta="Precio" type="number" min={0} value={precio} onChange={(e) => setPrecio(e.target.value)} />
+        <Entrada etiqueta="Nivel de alerta" type="number" min={0} value={nivel} onChange={(e) => setNivel(e.target.value)} />
+        <Boton type="submit" variante="contorno" disabled={ocupado} className="sm:col-span-2 sm:justify-self-start">
           Guardar cambios
         </Boton>
       </form>
@@ -140,9 +140,9 @@ export function Inventario() {
 
   return (
     <>
-      <Encabezado ceja={enAlerta ? `${enAlerta} ítems en alerta` : 'Existencias'} titulo="Inventario">
+      <Encabezado ceja={enAlerta ? `${cuenta(enAlerta, 'ítem', 'ítems')} en alerta` : 'Existencias'} titulo="Inventario">
         {edita && !creando && (
-          <Boton variante="claro" onClick={() => setCreando(true)}>
+          <Boton variante="primario" onClick={() => setCreando(true)}>
             Nuevo ítem
           </Boton>
         )}
@@ -163,8 +163,8 @@ export function Inventario() {
           cambiar('buscar', texto.trim());
         }}
       >
-        <Entrada sobre="oscuro" etiqueta="Buscar" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Nombre o código" />
-        <Seleccion sobre="oscuro" etiqueta="Categoría" value={categoria} onChange={(e) => cambiar('categoria', e.target.value)}>
+        <Entrada etiqueta="Buscar" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Nombre o código" />
+        <Seleccion etiqueta="Categoría" value={categoria} onChange={(e) => cambiar('categoria', e.target.value)}>
           <option value="">Todas</option>
           {(categorias ?? []).map((c) => (
             <option key={c.id} value={c.id}>
@@ -172,7 +172,7 @@ export function Inventario() {
             </option>
           ))}
         </Seleccion>
-        <Seleccion sobre="oscuro" etiqueta="Mostrar" value={alertas ? '1' : ''} onChange={(e) => cambiar('alertas', e.target.value)}>
+        <Seleccion etiqueta="Mostrar" value={alertas ? '1' : ''} onChange={(e) => cambiar('alertas', e.target.value)}>
           <option value="">Todo</option>
           <option value="1">Solo en alerta</option>
         </Seleccion>
@@ -187,16 +187,16 @@ export function Inventario() {
             <Fila key={i.id} onClick={edita ? () => setAbierto(abierto === i.id ? null : i.id) : undefined}>
               <Celda className="mono">{i.codigo}</Celda>
               <Celda>{i.nombre}</Celda>
-              <Celda className="text-warm-granite">{i.categoria}</Celda>
+              <Celda className="text-texto-2">{i.categoria}</Celda>
               <Celda>{pesos(i.precio)}</Celda>
               <Celda>{i.cantidad}</Celda>
-              <Celda className="text-warm-granite">{i.nivelAlerta}</Celda>
+              <Celda className="text-texto-2">{i.nivelAlerta}</Celda>
               <Celda>
-                <Etiqueta tono={i.enAlerta ? 'vivo' : 'listo'}>{i.enAlerta ? 'Alerta' : 'OK'}</Etiqueta>
+                <Etiqueta tono={i.enAlerta ? "alerta" : "listo"}>{i.enAlerta ? 'Alerta' : 'OK'}</Etiqueta>
               </Celda>
             </Fila>,
             abierto === i.id ? (
-              <tr key={`${i.id}-editar`} className="border-b border-carbon-lift">
+              <tr key={`${i.id}-editar`} className="border-b border-borde">
                 <td colSpan={7} className="px-12">
                   <EditarItem
                     item={i}

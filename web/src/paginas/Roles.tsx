@@ -2,10 +2,9 @@ import { useState } from 'react';
 import { api } from '../api/cliente';
 import type { RolInfo } from '../api/tipos';
 import { Boton } from '../componentes/Boton';
-import { Entrada } from '../componentes/Campos';
-import { Etiqueta } from '../componentes/Etiqueta';
-import { Aviso, Cargando, Encabezado, Tarjeta } from '../componentes/Superficies';
+import { Aviso, Cargando, Encabezado } from '../componentes/Superficies';
 import { Celda, Fila, Tabla } from '../componentes/Tabla';
+import { nombreRol } from '../logica/formato';
 import { usarAccion, usarDatos } from '../logica/usarDatos';
 
 function Descripcion({ rol, alGuardar }: { rol: RolInfo; alGuardar: (descripcion: string) => void }) {
@@ -13,7 +12,7 @@ function Descripcion({ rol, alGuardar }: { rol: RolInfo; alGuardar: (descripcion
   const cambio = texto.trim() !== rol.descripcion;
   return (
     <form
-      className="flex gap-8"
+      className="flex items-center gap-8"
       onSubmit={(e) => {
         e.preventDefault();
         alGuardar(texto.trim());
@@ -21,13 +20,13 @@ function Descripcion({ rol, alGuardar }: { rol: RolInfo; alGuardar: (descripcion
     >
       <input
         aria-label={`Descripción de ${rol.nombre}`}
-        className="h-32 w-full min-w-[240px] rounded-sm border border-ash-stroke bg-carbon-lift px-8 text-body-sm"
+        className="h-36 w-full min-w-[260px] rounded-lg border border-linea bg-lienzo px-12 text-body-sm outline-none focus:border-signal-blue"
         value={texto}
         maxLength={200}
         onChange={(e) => setTexto(e.target.value)}
       />
       {cambio && (
-        <Boton type="submit" className="h-32">
+        <Boton type="submit" variante="suave">
           Guardar
         </Boton>
       )}
@@ -35,63 +34,34 @@ function Descripcion({ rol, alGuardar }: { rol: RolInfo; alGuardar: (descripcion
   );
 }
 
+// Los roles son fijos: los crea la semilla y los permisos del código dependen de su
+// nombre. Aquí solo se ve cuántos usuarios tiene cada uno y se edita la descripción.
 export function Roles() {
   const { datos, error, cargando, recargar } = usarDatos<RolInfo[]>('/api/roles');
-  const [nombre, setNombre] = useState('');
-  const [descripcion, setDescripcion] = useState('');
   const accion = usarAccion();
-  const hacer = async (trabajo: () => Promise<unknown>) => {
-    if ((await accion.ejecutar(trabajo)) !== undefined) recargar();
+  const guardar = async (id: number, descripcion: string) => {
+    if ((await accion.ejecutar(() => api(`/api/roles/${id}`, { metodo: 'PATCH', cuerpo: { descripcion } }))) !== undefined) recargar();
   };
 
   return (
     <>
       <Encabezado ceja="Administración" titulo="Roles" />
-      <Tarjeta className="mb-40">
-        <form
-          className="grid gap-16 sm:grid-cols-[1fr_2fr_auto] sm:items-end"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void hacer(async () => {
-              await api('/api/roles', { metodo: 'POST', cuerpo: { nombre, descripcion } });
-              setNombre('');
-              setDescripcion('');
-              return true;
-            });
-          }}
-        >
-          <Entrada etiqueta="Nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="jefe_taller" required />
-          <Entrada etiqueta="Descripción" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} />
-          <Boton type="submit" variante="tinta" disabled={accion.ocupado}>
-            Crear rol
-          </Boton>
-        </form>
-        <p className="mt-16 text-caption text-graphite-mid">
-          Los permisos del sistema están atados a los roles administrador, recepcionista, mecánico y concesionario. Un rol nuevo no tiene pantallas hasta que se le den permisos en el código.
-        </p>
-      </Tarjeta>
+      <p className="mb-24 max-w-[720px] text-body-sm text-texto-2">
+        Los roles del taller son fijos: administrador, recepcionista, mecánico y concesionario. Para darle otro rol a una
+        persona, cámbielo en Usuarios.
+      </p>
       {(error || accion.error) && <Aviso>{error ?? accion.error}</Aviso>}
       {cargando && !datos ? (
         <Cargando />
       ) : (
-        <Tabla columnas={['Rol', 'Descripción', 'Usuarios', 'Tipo', '']}>
+        <Tabla columnas={['Rol', 'Descripción', 'Usuarios']}>
           {(datos ?? []).map((r) => (
             <Fila key={r.id}>
-              <Celda className="mono">{r.nombre}</Celda>
+              <Celda className="font-semibold">{nombreRol(r.nombre)}</Celda>
               <Celda>
-                <Descripcion rol={r} alGuardar={(d) => hacer(() => api(`/api/roles/${r.id}`, { metodo: 'PATCH', cuerpo: { descripcion: d } }))} />
+                <Descripcion rol={r} alGuardar={(d) => guardar(r.id, d)} />
               </Celda>
               <Celda>{r.usuarios}</Celda>
-              <Celda>
-                <Etiqueta>{r.sistema ? 'Sistema' : 'Propio'}</Etiqueta>
-              </Celda>
-              <Celda>
-                {!r.sistema && (
-                  <Boton variante="fantasma" disabled={accion.ocupado || r.usuarios > 0} onClick={() => hacer(() => api(`/api/roles/${r.id}`, { metodo: 'DELETE' }))}>
-                    Borrar
-                  </Boton>
-                )}
-              </Celda>
             </Fila>
           ))}
         </Tabla>

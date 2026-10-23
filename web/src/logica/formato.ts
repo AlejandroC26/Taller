@@ -34,14 +34,31 @@ export const NOMBRE_ESTADO: Record<Estado, string> = {
   cancelado: 'Cancelado',
 };
 
-// Tono de la etiqueta: naranja = en curso (algo pasa ahora), verde = listo, neutro = el
-// resto. El color es solo para estado: nunca para botones ni superficies.
-export type Tono = 'vivo' | 'listo' | 'neutro';
-export function tonoDe(estado: Estado): Tono {
-  if (estado === 'en_diagnostico' || estado === 'en_reparacion') return 'vivo';
-  if (estado === 'terminado' || estado === 'entregado') return 'listo';
-  return 'neutro';
-}
+// 1 paso, 2 pasos.
+export const cuenta = (n: number, singular: string, plural: string) => `${n} ${n === 1 ? singular : plural}`;
+
+const NOMBRE_ROL: Record<string, string> = {
+  administrador: 'Administrador',
+  recepcionista: 'Recepcionista',
+  mecanico: 'Mecánico',
+  concesionario: 'Concesionario',
+};
+export const nombreRol = (rol: string) => NOMBRE_ROL[rol] ?? rol;
+
+// Tono de la píldora de estado (DESIGN.md): azul = en progreso, violeta = espera
+// validación, teal = aprobado, menta = hecho, magenta = alerta, gris = el resto.
+export type Tono = 'progreso' | 'revision' | 'aprobado' | 'listo' | 'alerta' | 'neutro';
+const TONO: Record<Estado, Tono> = {
+  recibido: 'neutro',
+  en_diagnostico: 'progreso',
+  diagnosticado: 'revision',
+  aprobado: 'aprobado',
+  en_reparacion: 'progreso',
+  terminado: 'listo',
+  entregado: 'listo',
+  cancelado: 'neutro',
+};
+export const tonoDe = (estado: Estado): Tono => TONO[estado];
 
 // Para <input type="datetime-local">: la hora local sin zona.
 export function aEntradaLocal(fechaHoraLocal: Date) {

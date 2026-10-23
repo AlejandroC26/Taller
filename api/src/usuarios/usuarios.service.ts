@@ -4,7 +4,7 @@ import { aActor } from './actor';
 import type { Actor } from './actor';
 import { cifrarClave, claveCorrecta } from './claves';
 import type { EditarUsuario, NuevoUsuario } from './dto';
-import { ROLES_SISTEMA, Rol } from './rol.entity';
+import { Rol } from './rol.entity';
 import { emitir, verificar } from './tokens';
 import type { Audiencia } from './tokens';
 import { Usuario } from './usuario.entity';
@@ -122,35 +122,16 @@ export async function listarRoles() {
   );
   return roles.map((r) => ({
     ...r,
-    sistema: (ROLES_SISTEMA as readonly string[]).includes(r.nombre),
     usuarios: Number(conteo.find((c) => c.rol_id === r.id)?.total ?? 0),
   }));
 }
 
-export async function crearRol(datos: { nombre: string; descripcion: string }) {
-  const repo = (await bd()).getRepository(Rol);
-  if (await repo.existsBy({ nombre: datos.nombre })) throw conflicto('Ya existe un rol con ese nombre');
-  return repo.save(repo.create(datos));
-}
-
+// Los roles son fijos (los crea la semilla) porque los permisos del código dependen de
+// su nombre: solo se edita la descripción.
 export async function editarRol(id: number, descripcion: string) {
   const repo = (await bd()).getRepository(Rol);
   const rol = await repo.findOneBy({ id });
   if (!rol) throw noEncontrado('No existe ese rol');
   rol.descripcion = descripcion;
   return repo.save(rol);
-}
-
-export async function borrarRol(id: number) {
-  const db = await bd();
-  const rol = await db.getRepository(Rol).findOneBy({ id });
-  if (!rol) throw noEncontrado('No existe ese rol');
-  if ((ROLES_SISTEMA as readonly string[]).includes(rol.nombre)) {
-    throw invalido('Los roles del sistema no se pueden borrar');
-  }
-  if (await db.getRepository(Usuario).existsBy({ rol: { id } })) {
-    throw conflicto('Hay usuarios con ese rol: cámbielos antes de borrarlo');
-  }
-  await db.getRepository(Rol).delete(id);
-  return { borrado: rol.nombre };
 }

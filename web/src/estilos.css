@@ -1,113 +1,225 @@
 @import 'tailwindcss';
 
-/* Tokens de DESIGN.md (Factory), copiados tal cual. No agregue colores. */
+/* dark: se activa con <html data-tema="oscuro"> (el interruptor de tema), no con el
+   sistema operativo. */
+@custom-variant dark (&:where([data-tema='oscuro'], [data-tema='oscuro'] *));
+
+/* Tokens de DESIGN.md (ClickUp), copiados tal cual. No agregue colores fuera de aquí. */
 @theme {
   /* Colors */
-  --color-obsidian-canvas: #101010;
-  --color-carbon-lift: #1d1a18;
-  --color-ash-stroke: #3d3a39;
-  --color-graphite-mid: #4d4947;
-  --color-warm-granite: #8a8380;
-  --color-pale-stone: #b8b3b0;
-  --color-bone: #eeeeee;
-  --color-chalk: #fafafa;
-  --color-signal-orange: #ee6018;
-  --color-metric-green: #a0ca92;
+  --color-signal-white: #ffffff;
+  --color-ink-black: #202020;
+  --color-onyx: #090c1d;
+  --color-carbon: #2a2a2a;
+  --color-slate: #646464;
+  --color-ash: #838383;
+  --color-fog: #b3b3b3;
+  --color-cloud: #d4d4d4;
+  --color-bone: #e8e8e8;
+  --color-mist: #f8f9fa;
+  --color-plaster: #e9ebf0;
+  --color-mercury: #eeeeee;
+  --color-brand-violet: #6647f0;
+  --color-signal-blue: #0091ff;
+  --color-mint: #6ee7b7;
+  --color-emerald: #00c07a;
+  --color-teal-tag: #16c0a4;
+  --color-rainbow-conic: #7d5be7;
+  --color-primary-gradient: #40ddff;
+  --color-dark-fade: #111111;
 
   /* Typography */
-  --font-geist: 'Geist', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-geist-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-plus-jakarta-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-inter: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-sometype-mono: 'Sometype Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   /* Typography — Scale */
-  --text-caption: 12px;
-  --leading-caption: 1;
-  --tracking-caption: -0.24px;
   --text-body-sm: 14px;
-  --leading-body-sm: 1.43;
+  --leading-body-sm: 1.5;
+  --tracking-body-sm: -0.01px;
   --text-body: 16px;
   --leading-body: 1.5;
-  --text-heading: 36px;
-  --leading-heading: 1.1;
-  --tracking-heading: -1.12px;
-  --text-heading-lg: 44px;
-  --leading-heading-lg: 1.12;
-  --tracking-heading-lg: -1.1px;
-  --text-display: 72px;
-  --leading-display: 1;
-  --tracking-display: -2.88px;
+  --tracking-body: -0.01px;
+  --text-subheading: 20px;
+  --leading-subheading: 1.5;
+  --tracking-subheading: -0.02px;
+  --text-heading-sm: 34px;
+  --leading-heading-sm: 1.2;
+  --tracking-heading-sm: -0.04px;
+  --text-heading: 48px;
+  --leading-heading: 1.25;
+  --tracking-heading: -0.035px;
+  --text-heading-lg: 60px;
+  --leading-heading-lg: 1.1;
+  --tracking-heading-lg: -0.035px;
+  --text-display: 80px;
+  --leading-display: 1.2;
+  --tracking-display: -0.04px;
 
   /* Spacing */
+  --spacing-4: 4px;
   --spacing-8: 8px;
+  --spacing-12: 12px;
   --spacing-16: 16px;
+  --spacing-20: 20px;
   --spacing-24: 24px;
+  --spacing-28: 28px;
   --spacing-32: 32px;
   --spacing-40: 40px;
+  --spacing-48: 48px;
+  --spacing-52: 52px;
   --spacing-56: 56px;
+  --spacing-72: 72px;
   --spacing-80: 80px;
-  --spacing-96: 96px;
-  --spacing-120: 120px;
+  --spacing-100: 100px;
 
   /* Border Radius */
-  --radius-sm: 3px;
-  --radius-lg: 10px;
-  --radius-2xl: 20px;
+  --radius-sm: 1px;
+  --radius-lg: 9px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-2xl-2: 20px;
+  --radius-full-6: 9999px;
+
+  /* Shadows */
+  --shadow-subtle: rgba(0, 0, 0, 0.1) 0px 1px 3px 0px, rgba(0, 0, 0, 0.1) 0px 1px 2px -1px;
+  --shadow-subtle-2: rgba(18, 43, 165, 0.04) 0px 1px 1px -0.5px, rgba(18, 43, 165, 0.04) 0px 3px 3px -1.5px, rgba(18, 43, 165, 0.04) 0px 6px 6px -3px, rgba(18, 43, 165, 0.04) 0px 12px 12px -6px;
+  --shadow-sm: rgba(13, 21, 48, 0.04) 0px 4px 4px 0px;
 }
 
 /* Extensiones del proyecto (no cambian la paleta):
-   - --spacing: 1px hace que toda utilidad numérica sea en píxeles (p-24 = 24px), igual
-     que los nombres de los tokens de DESIGN.md.
-   - Cada tamaño de texto lleva su interlineado y su tracking. */
+   - --spacing: 1px: toda utilidad numérica es en píxeles (p-28 = 28 px). Use múltiplos
+     de 4, como pide DESIGN.md.
+   - Cada tamaño de texto lleva su interlineado y su tracking (en em: DESIGN.md los
+     escribe en px por error).
+   - El magenta de alerta (vencido / sin stock) sale del degradado cónico de DESIGN.md. */
 @theme {
   --spacing: 1px;
-  --text-caption--line-height: 1;
-  --text-caption--letter-spacing: -0.24px;
-  --text-body-sm--line-height: 1.43;
+  --text-body-sm--line-height: 1.5;
   --text-body--line-height: 1.5;
-  --text-heading--line-height: 1.1;
-  --text-heading--letter-spacing: -1.12px;
-  --text-heading-lg--line-height: 1.12;
-  --text-heading-lg--letter-spacing: -1.1px;
-  --text-display--line-height: 1;
-  --text-display--letter-spacing: -2.88px;
-  --ease-mecanica: cubic-bezier(0.4, 0, 0.2, 1);
+  --text-subheading--line-height: 1.5;
+  --text-subheading--letter-spacing: -0.02em;
+  --text-heading-sm--line-height: 1.2;
+  --text-heading-sm--letter-spacing: -0.023em;
+  --text-heading--line-height: 1.25;
+  --text-heading--letter-spacing: -0.035em;
+  --text-heading-lg--line-height: 1.1;
+  --text-heading-lg--letter-spacing: -0.035em;
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.04em;
+  --color-alerta: #fb49a5;
+  --ease-asentar: cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+/* Colores por significado: cambian con el tema. Los componentes usan estos
+   (bg-lienzo, text-texto, border-borde…), nunca un gris fijo. */
+:root {
+  --lienzo: #ffffff;
+  --tarjeta: #f8f9fa;
+  --banda: #e9ebf0;
+  --texto: #202020;
+  --titulo: #090c1d;
+  --texto-2: #646464;
+  --texto-3: #838383;
+  --borde: #e8e8e8;
+  --linea: #d4d4d4;
+  --chip: #eeeeee;
+  --accion: #202020;
+  --accion-texto: #ffffff;
+  --sutil: rgba(0, 0, 0, 0.04);
+  color-scheme: light;
+}
+/* Modo oscuro con las superficies oscuras de DESIGN.md (Dark Panel #111111, Ink Black
+   #202020, Carbon #2a2a2a) y Mist #f8f9fa como acción sobre oscuro. */
+:root[data-tema='oscuro'] {
+  --lienzo: #111111;
+  --tarjeta: #202020;
+  --banda: #000000;
+  --texto: #f8f9fa;
+  --titulo: #ffffff;
+  --texto-2: #b3b3b3;
+  --texto-3: #838383;
+  --borde: #2a2a2a;
+  --linea: #2a2a2a;
+  --chip: #2a2a2a;
+  --accion: #f8f9fa;
+  --accion-texto: #202020;
+  --sutil: rgba(255, 255, 255, 0.06);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-lienzo: var(--lienzo);
+  --color-tarjeta: var(--tarjeta);
+  --color-banda: var(--banda);
+  --color-texto: var(--texto);
+  --color-titulo: var(--titulo);
+  --color-texto-2: var(--texto-2);
+  --color-texto-3: var(--texto-3);
+  --color-borde: var(--borde);
+  --color-linea: var(--linea);
+  --color-chip: var(--chip);
+  --color-accion: var(--accion);
+  --color-accion-texto: var(--accion-texto);
+  --color-sutil: var(--sutil);
 }
 
 @layer base {
-  html {
-    color-scheme: dark;
-  }
   body {
-    background: var(--color-obsidian-canvas);
-    color: var(--color-bone);
-    font-family: var(--font-geist);
-    font-weight: 400;
+    background: var(--lienzo);
+    color: var(--texto);
+    font-family: var(--font-inter);
     font-size: var(--text-body);
     line-height: var(--leading-body);
+    font-feature-settings: 'calt' 0, 'clig' 0, 'liga' 0;
     -webkit-font-smoothing: antialiased;
   }
-  h1, h2, h3, h4 {
-    font-weight: 400;
+  h1, h2, h3 {
+    font-family: var(--font-plus-jakarta-sans);
+    font-weight: 700;
+    color: var(--titulo);
+    font-feature-settings: 'calt' 0;
   }
-  * {
-    transition-property: color, background-color, border-color, stroke;
+  a, button, input, select, textarea {
+    transition-property: color, background-color, border-color, box-shadow, opacity;
     transition-duration: 0.15s;
-    transition-timing-function: var(--ease-mecanica);
+    transition-timing-function: var(--ease-asentar);
   }
   :focus-visible {
-    outline: 1px solid var(--color-bone);
+    outline: 2px solid var(--color-signal-blue);
     outline-offset: 2px;
-  }
-  /* En las tarjetas claras el foco es oscuro. */
-  .superficie-clara :focus-visible {
-    outline-color: var(--color-obsidian-canvas);
   }
 }
 
-/* La voz de instrumento: Geist Mono 12 px en mayúsculas. */
+/* Etiqueta técnica: Sometype Mono 12 px en mayúsculas, tracking 0.06em. */
 @utility mono {
-  font-family: var(--font-geist-mono);
-  font-size: var(--text-caption);
+  font-family: var(--font-sometype-mono);
+  font-size: 12px;
   line-height: 1.2;
-  letter-spacing: -0.24px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+/* El único momento expresivo: borde con el degradado cónico que gira. Uno por página.
+   Gira cada 4 s (DESIGN.md dice 0,45 s, demasiado rápido para una pantalla de trabajo)
+   y se detiene si el usuario pidió menos movimiento. */
+@property --giro {
+  syntax: '<angle>';
+  initial-value: 90deg;
+  inherits: false;
+}
+@keyframes girar {
+  to {
+    --giro: 450deg;
+  }
+}
+@utility borde-arcoiris {
+  border: 2px solid transparent;
+  background:
+    linear-gradient(var(--lienzo), var(--lienzo)) padding-box,
+    conic-gradient(from var(--giro), rgb(125, 91, 231) 19%, rgb(188, 63, 218) 28%, rgb(250, 36, 206) 37%, rgb(251, 73, 165) 45%, rgb(252, 109, 123) 52%, rgb(253, 132, 97) 55%, rgb(253, 154, 70) 58%, rgb(246, 135, 198) 65%, rgb(163, 160, 224) 80%, rgb(79, 185, 250) 95%, rgb(0, 145, 255) 100%) border-box;
+  animation: girar 4s linear infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
 }

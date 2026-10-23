@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { vi } from 'vitest';
 import type { Actor, Rol } from '../api/tipos';
 import { SesionProvider } from '../sesion/sesion';
+import { TemaProvider } from '../tema/tema';
 
 export const actorDe = (rol: Rol, id = `id-${rol}`): Actor => ({ id, nombre: 'Ana', apellido: 'Prueba', usuario: rol, rol });
 
@@ -46,16 +47,18 @@ export function renderizar(
   if (actor) sessionStorage.setItem('taller.token', 'token-prueba');
   const llamadas = simularApi({ '/api/auth/yo': actor ?? { estado: 401, json: { message: 'Falta el token' } }, ...rutas });
   const resultado = render(
-    <MemoryRouter initialEntries={[ruta]}>
-      <SesionProvider>
-        <Routes>
-          <Route path={patron} element={ui} />
-          <Route path="/entrar" element={<p>Pantalla de entrada</p>} />
-          <Route path="/panel" element={<p>Pantalla del panel</p>} />
-          <Route path="/mis-trabajos" element={<p>Pantalla de mis trabajos</p>} />
-        </Routes>
-      </SesionProvider>
-    </MemoryRouter>,
+    <TemaProvider>
+      <MemoryRouter initialEntries={[ruta]}>
+        <SesionProvider>
+          <Routes>
+            <Route path={patron} element={ui} />
+            <Route path="/entrar" element={<p>Pantalla de entrada</p>} />
+            <Route path="/panel" element={<p>Pantalla del panel</p>} />
+            <Route path="/mis-trabajos" element={<p>Pantalla de mis trabajos</p>} />
+          </Routes>
+        </SesionProvider>
+      </MemoryRouter>
+    </TemaProvider>,
   );
   return { ...resultado, llamadas };
 }

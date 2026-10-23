@@ -1,6 +1,6 @@
-# Taller — guía para Claude
+# Taller Pulgas Locas — guía para Claude
 
-Sistema de gestión de un taller mecánico. Gira alrededor de la **orden de servicio**:
+Sistema de gestión del **Taller Pulgas Locas** (mecánica general). Gira alrededor de la **orden de servicio**:
 
 1. Recepción registra el carro.
 2. Un mecánico lo diagnostica, paso a paso, con repuestos y costo.
@@ -83,9 +83,12 @@ api/
 web/src/
   api/                    cliente.ts (fetch + token en sessionStorage + 401 → salir), tipos.ts
   sesion/                 SesionProvider, usarSesion, RutaProtegida
-  logica/                 formato, permisos (espejo de la API), costos (espejo), usarDatos/usarAccion
-  componentes/            Boton, Etiqueta/Pulso/EstadoOrden, Superficies (Tarjeta, Contorno, Ventana,
-                          Metrica, Encabezado, Aviso, Cargando), Campos, Tabla, BarraNav
+  tema/                   TemaProvider, usarTema, InterruptorTema (claro/oscuro)
+  logica/                 formato (pesos, fechas, tonos, cuenta, nombreRol), permisos (espejo de la API),
+                          costos (espejo), usarDatos/usarAccion
+  componentes/            Boton, Etiqueta/Pulso/EstadoOrden, Avatar/GrupoAvatares, Superficies (Tarjeta,
+                          Contorno, Ventana, Metrica, Encabezado, Ceja, Aviso, Cargando), Campos, Tabla,
+                          BarraNav (y Marca)
   paginas/                Entrar, Panel, Ordenes, OrdenDetalle, Diagnostico, Reparacion, MisTrabajos,
                           Inventario, Clientes, Usuarios, Roles, Integraciones, SinAcceso
   pruebas/                preparar.ts, utilidades.tsx (renderizar, simularApi, orden)
@@ -138,7 +141,7 @@ web/src/
 
 | Acción | Admin | Recepción | Mecánico |
 |---|---|---|---|
-| Usuarios, roles, integraciones | ✔ | — | — |
+| Usuarios, descripción de los roles, integraciones | ✔ | — | — |
 | Clientes, vehículos, crear orden, asignar, aprobar, entregar, cancelar | ✔ | ✔ | — |
 | Inventario: crear, editar, movimientos | ✔ | ✔ | Solo consulta |
 | Registrar diagnóstico, horas, partes, tareas | ✔ | — | Solo si está asignado a esa etapa |
@@ -147,46 +150,63 @@ web/src/
 | Panel | ✔ | ✔ | — |
 
 - El rol `concesionario` solo usa `POST /api/integraciones/concesionario/ingresos`, `GET …/vehiculos/:referencia` y sus 2 herramientas MCP, y ve únicamente las órdenes de origen concesionario.
-- Los roles nuevos que cree el administrador no tienen permisos hasta que se agreguen en el código.
+- **Los roles son fijos**: administrador, recepcionista, mecánico y concesionario. Los crea la semilla y no se pueden crear ni borrar, porque los permisos del código dependen de su nombre. El administrador solo edita su descripción (`PATCH /api/roles/:id`) y cambia el rol de cada usuario. Si algún día hace falta un rol nuevo, se agrega en `ROLES_SISTEMA`, en la semilla, en los permisos de la API y en `web/src/logica/permisos.ts`.
 
 ## Estilo visual: `DESIGN.md` es obligatorio
 
-La web usa el sistema «Factory» de `DESIGN.md`. Los tokens están copiados en `web/src/estilos.css` (`@theme`). Antes de tocar la interfaz:
+La web usa el sistema «ClickUp» de `DESIGN.md`: tema claro, tipografía pesada, todo en píldoras y color solo en estados. Los tokens están copiados tal cual en `web/src/estilos.css` (`@theme`). Antes de tocar la interfaz:
+
+**Tema claro y oscuro:**
+- El claro es el de DESIGN.md y es el valor por defecto. El oscuro usa las superficies oscuras del mismo DESIGN.md: Dark Panel `#111111`, Ink Black `#202020`, Carbon `#2a2a2a` y Mist `#f8f9fa` como acción.
+- El interruptor (`InterruptorTema`, en `web/src/tema/`) pone `data-tema="oscuro"` en `<html>` y recuerda la elección en `localStorage` (`taller.tema`). Un script en `index.html` lo aplica antes de pintar.
+- Use **siempre los colores por significado**, que cambian solos con el tema: `bg-lienzo`, `bg-tarjeta`, `bg-banda`, `text-texto`, `text-titulo`, `text-texto-2`, `text-texto-3`, `border-borde`, `border-linea`, `bg-chip`, `bg-accion` / `text-accion-texto` y `bg-sutil`. Nunca un gris fijo (`text-slate`, `bg-white`…) para superficies o textos.
+- Para un ajuste puntual en oscuro use la variante `dark:` (`dark:bg-carbon`).
 
 **Sí:**
-- Lienzo `#101010` en todo.
-- Las únicas superficies claras son las tarjetas `Tarjeta` (`#eeeeee`, radio 10 px, padding 24 px, texto `#101010`). Ahí van los formularios.
-- Use Geist 400 para todo y 500 solo para énfasis puntual.
-- Geist Mono 12 px en MAYÚSCULAS (utilidad `mono`) para cejas, etiquetas de campos, encabezados de tabla y estados.
-- Radios: 3 px en botones y campos (`rounded-sm`), 10 px en tarjetas (`rounded-lg`), 20 px en paneles grandes (`rounded-2xl`).
-- Profundidad por contraste y bordes de 1 px (`border-carbon-lift` / `border-ash-stroke`).
-- Transiciones de 0.15 s y nada más.
-- `--spacing: 1px`: las utilidades numéricas son píxeles (`p-24` = 24 px, `gap-16` = 16 px). Use la escala de DESIGN.md: 8, 16, 24, 32, 40, 56, 80, 96, 120.
-- **Color = estado**: naranja `signal-orange` para lo que está en curso o en alerta (pulso de 6 px), verde `metric-green` para listo o disponible. Use siempre `Etiqueta` / `EstadoOrden` / `Pulso`.
+- **Tipografía**:
+  - Plus Jakarta Sans 700/800 en títulos (`h1`–`h3` ya la usan), con tracking negativo (`text-heading` = 48 px, -0.035em).
+  - Inter para el cuerpo (16 / 14 px).
+  - Sometype Mono 12 px en MAYÚSCULAS con tracking 0.06em (utilidad `mono`) para cejas, encabezados de tabla y etiquetas técnicas.
+  - Las etiquetas de los campos van en Inter 14 px 500.
+- **Botones** (`Boton`), siempre píldora (`rounded-full`), Plus Jakarta 14 px 700:
+  - `primario`: `#202020` relleno (en oscuro, Mist). Uno por pantalla, para la acción principal.
+  - `contorno`: borde `#e8e8e8`, sin relleno. Es el valor por defecto.
+  - `azul`: borde azul `#0091ff`, para una acción interactiva secundaria.
+  - `suave`: compacto, con fondo sutil, para filas y barras.
+- **Estados** con `Etiqueta` / `EstadoOrden` (píldoras de 12 px 600):
+
+  | Tono | Píldora | Estados de la orden |
+  |---|---|---|
+  | `progreso` | azul `#0091ff`, texto blanco | en diagnóstico, en reparación |
+  | `revision` | violeta `#6647f0` | por aprobar |
+  | `aprobado` | teal `#16c0a4` | aprobado |
+  | `listo` | menta `#6ee7b7`, texto oscuro | terminado, entregado |
+  | `alerta` | magenta `#fb49a5` (sale del degradado cónico) | stock bajo, fallas |
+  | `neutro` | gris | recibido, cancelado |
+
+- **Radios**: 9 px en campos (`rounded-lg`), 12 px en tarjetas y tablas (`rounded-xl`), 20 px en paneles grandes (`rounded-2xl-2`), píldora en botones, etiquetas y navegación.
+- **Superficies planas**:
+  - Tarjetas `bg-tarjeta` (`#f8f9fa`) con borde de 1 px `#e8e8e8` y 28 px de padding.
+  - La única sombra es `shadow-subtle-2`, en `Ventana` (el panel tipo captura del producto).
+- **Espaciado**: base de 4 px. `--spacing: 1px` hace que las utilidades numéricas sean píxeles (`p-28` = 28 px); use múltiplos de 4. Espacio entre secciones de 80 px y entre elementos de 12 px.
+- **Identidad**: el logo es `web/public/logo-pulgas-locas.webp` (también es el favicon). Use siempre `Logo` / `Marca` de `componentes/Marca.tsx`, que lo ponen sobre una placa blanca (`bg-signal-white`) porque la imagen no es transparente. El nombre visible es «Pulgas Locas» con el lema «Mecánica general». En la API, el nombre sale de `NOMBRE_TALLER` (`config.ts`, variable `TALLER_NOMBRE`).
+- **Avatares** (`Avatar`, `GrupoAvatares`) con iniciales para personas: mecánicos y usuario en sesión.
+- **Borde arcoíris** (`borde-arcoiris`): el degradado cónico que gira, **uno por página como máximo** (hoy solo en la tarjeta de inicio de sesión). Gira cada 4 s, no cada 0,45 s como dice DESIGN.md (demasiado rápido para una pantalla de trabajo), y se detiene con `prefers-reduced-motion`.
+- **Movimiento**: transiciones de 0.15 s en hover, curva `ease-asentar`.
 
 **No:**
-- Colores nuevos.
-- Sombras, brillos o desenfoques.
-- Negrita 600+.
-- Interlineado mayor a 1.5.
-- Radios redondeados tipo píldora.
-- Naranja o verde en botones, fondos o textos grandes.
-- Otras fuentes.
-- Menú lateral: solo la barra superior de 64 px.
-
-**Botones** (`Boton`):
-- `oscuro` (`#1d1a18`) en fondo oscuro.
-- `claro` (`#fafafa`, texto `#101010`) para la acción principal de la página.
-- `tinta` (`#101010`) dentro de tarjetas claras.
-- `fantasma` (solo borde) para lo secundario, con `sobre="claro"` en tarjetas.
-
-**Contradicciones del propio DESIGN.md ya resueltas:**
-- Se ignora la «pill 9999px».
-- El relleno oscuro es `carbon-lift`.
-- El botón claro lleva texto `#101010`.
+- Colores fuera de los tokens.
+- Violeta o azul como relleno de botones. El violeta es solo el estado «por aprobar».
+- Degradados en tarjetas o fondos (solo el borde arcoíris).
+- Sombras fuertes o apiladas.
+- Radios distintos dentro del mismo tipo de componente.
+- Plus Jakarta por debajo de 14 px.
+- Tracking positivo en texto normal (solo en `mono`).
+- Menú lateral: solo la barra superior de 64 px, con los enlaces en píldora.
 
 **Móvil:**
 - Margen lateral de 16 px.
+- Hasta `lg` los enlaces de la barra pasan a una segunda fila desplazable.
 - Las tablas se desplazan dentro de su caja (`Tabla` ya lo hace) y la página nunca se desplaza en horizontal.
 
 ## MCP del taller
@@ -258,4 +278,4 @@ En la otra dirección, el concesionario envía carros con `registrar_ingreso_veh
 2. Si cambió una entidad: `npm run migracion:generar -- src/base-datos/migraciones/<Nombre>`, revise el SQL y corra `npm run migracion:correr`.
 3. Si cambió una regla o un permiso: actualice `web/src/logica/permisos.ts` o `costos.ts` (son espejos) y las tablas de esta guía.
 4. Si tocó el flujo de órdenes: `npm run flujo` con la API en marcha.
-5. Si tocó la interfaz: revísela en el navegador a ancho de escritorio y de móvil contra las reglas de DESIGN.md.
+5. Si tocó la interfaz: revísela en el navegador en tema claro y oscuro, a ancho de escritorio y de móvil, contra las reglas de DESIGN.md.

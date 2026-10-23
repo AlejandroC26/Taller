@@ -36,7 +36,7 @@ function FormularioHoras({ rep, alGuardar }: { rep: Reparacion; alGuardar: (cuer
   return (
     <Tarjeta>
       <form onSubmit={enviar} className="grid gap-16 sm:grid-cols-2">
-        <h2 className="text-heading sm:col-span-2">Registrar horas</h2>
+        <h2 className="text-subheading sm:col-span-2">Registrar horas</h2>
         <Entrada etiqueta="Inicio" type="datetime-local" value={inicio} onChange={(e) => setInicio(e.target.value)} required />
         <Entrada etiqueta="Fin" type="datetime-local" value={fin} onChange={(e) => setFin(e.target.value)} required />
         <Seleccion etiqueta="Paso" value={tareaId} onChange={(e) => setTareaId(e.target.value)}>
@@ -49,7 +49,7 @@ function FormularioHoras({ rep, alGuardar }: { rep: Reparacion; alGuardar: (cuer
         </Seleccion>
         <Entrada etiqueta="Nota" value={nota} onChange={(e) => setNota(e.target.value)} maxLength={300} />
         <div className="flex items-center gap-16 sm:col-span-2">
-          <Boton type="submit" variante="tinta" disabled={ocupado}>
+          <Boton type="submit" variante="primario" disabled={ocupado}>
             Registrar horas
           </Boton>
           {error && <Aviso>{error}</Aviso>}
@@ -74,7 +74,7 @@ function FormularioParte({ items, alGuardar }: { items: Item[]; alGuardar: (cuer
         }}
         className="grid gap-16 sm:grid-cols-[2fr_1fr]"
       >
-        <h2 className="text-heading sm:col-span-2">Parte usada</h2>
+        <h2 className="text-subheading sm:col-span-2">Parte usada</h2>
         <Seleccion etiqueta="Ítem" value={itemId} onChange={(e) => setItemId(e.target.value)} required>
           <option value="">Elija del inventario</option>
           {items.map((i) => (
@@ -85,7 +85,7 @@ function FormularioParte({ items, alGuardar }: { items: Item[]; alGuardar: (cuer
         </Seleccion>
         <Entrada etiqueta="Cantidad" type="number" min={1} max={item?.cantidad} value={cantidad} onChange={(e) => setCantidad(e.target.value)} required />
         <div className="flex items-center gap-16 sm:col-span-2">
-          <Boton type="submit" variante="tinta" disabled={ocupado || !itemId}>
+          <Boton type="submit" variante="primario" disabled={ocupado || !itemId}>
             Descontar del inventario
           </Boton>
           {error && <Aviso>{error}</Aviso>}
@@ -117,7 +117,7 @@ export function ReparacionPagina() {
     <>
       <Encabezado ceja={`Orden ${codigo} · ${orden.datos.vehiculo.placa} · inició ${fecha(r.iniciadaEn)}`} titulo="Reparación">
         <EstadoOrden estado={r.estadoOrden} />
-        <Link to={`/ordenes/${codigo}`} className="flex h-36 items-center px-14 text-body-sm text-pale-stone hover:text-chalk">
+        <Link to={`/ordenes/${codigo}`} className="flex h-36 items-center px-14 text-body-sm text-texto-3 hover:underline">
           Volver a la orden
         </Link>
       </Encabezado>
@@ -128,19 +128,19 @@ export function ReparacionPagina() {
             <Ceja className="mb-16">Paso a paso</Ceja>
             <ul className="flex flex-col">
               {r.tareas.map((t) => (
-                <li key={t.id} className="flex items-start gap-16 border-b border-carbon-lift py-12">
+                <li key={t.id} className="flex items-start gap-16 border-b border-borde py-12">
                   <input
                     type="checkbox"
                     aria-label={`Paso ${t.posicion} hecho`}
-                    className="mt-4 size-16 accent-bone"
+                    className="mt-4 size-16 accent-signal-blue"
                     checked={t.completada}
                     disabled={!trabaja || ocupado}
                     onChange={(e) => ejecutar(() => actualizar(api(`${ruta}/tareas/${t.id}`, { metodo: 'PATCH', cuerpo: { completada: e.target.checked } })))}
                   />
-                  <span className={`flex-1 ${t.completada ? 'text-warm-granite line-through' : ''}`}>
+                  <span className={`flex-1 ${t.completada ? 'text-texto-2 line-through' : ''}`}>
                     {t.posicion}. {t.descripcion}
                   </span>
-                  <span className="mono text-warm-granite">
+                  <span className="mono text-texto-2">
                     {horas(t.horasEstimadas)} · {pesos(t.valorServicio)}
                   </span>
                 </li>
@@ -158,7 +158,7 @@ export function ReparacionPagina() {
                   <Celda>{fecha(h.inicio)}</Celda>
                   <Celda>{fecha(h.fin)}</Celda>
                   <Celda className="mono">{horas(h.horas)}</Celda>
-                  <Celda className="text-warm-granite">{h.nota}</Celda>
+                  <Celda className="text-texto-2">{h.nota}</Celda>
                 </Fila>
               ))}
             </Tabla>
@@ -202,7 +202,7 @@ export function ReparacionPagina() {
           </Ventana>
           {trabaja && (
             <Boton
-              variante="claro"
+              variante="primario"
               disabled={ocupado || r.horas.length === 0}
               onClick={() =>
                 ejecutar(async () => {
@@ -214,7 +214,7 @@ export function ReparacionPagina() {
               Terminar reparación
             </Boton>
           )}
-          {trabaja && r.horas.length === 0 && <p className="text-caption text-warm-granite">Registre las horas antes de terminar.</p>}
+          {trabaja && r.horas.length === 0 && <p className="text-[12px] text-texto-2">Registre las horas antes de terminar.</p>}
           {error && <Aviso>{error}</Aviso>}
         </aside>
       </div>

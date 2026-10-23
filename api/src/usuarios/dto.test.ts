@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { editarUsuarioDto, entrarDto, nuevoUsuarioDto, rolDto } from './dto';
+import { editarRolDto, editarUsuarioDto, entrarDto, nuevoUsuarioDto } from './dto';
 
 const valido = {
   nombre: 'Ana',
@@ -37,8 +37,8 @@ describe('validación de usuarios', () => {
     expect(entrarDto.parse({ usuario: ' ADMIN ', clave: 'x' }).usuario).toBe('admin');
   });
 
-  it('el nombre del rol solo admite minúsculas y guion bajo', () => {
-    expect(rolDto.parse({ nombre: 'Jefe_Taller' }).nombre).toBe('jefe_taller');
-    expect(rolDto.safeParse({ nombre: 'jefe taller' }).success).toBe(false);
+  it('del rol solo se edita la descripción, de máximo 200 caracteres', () => {
+    expect(editarRolDto.parse({ descripcion: ' Atiende clientes ', nombre: 'otro' })).toEqual({ descripcion: 'Atiende clientes' });
+    expect(editarRolDto.safeParse({ descripcion: 'x'.repeat(201) }).success).toBe(false);
   });
 });

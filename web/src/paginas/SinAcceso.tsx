@@ -7,7 +7,7 @@ export function SinAcceso() {
   return (
     <>
       <Encabezado ceja={`Rol ${actor?.rol ?? ''}`} titulo="Sin pantallas para este rol" />
-      <p className="max-w-[640px] text-warm-granite">
+      <p className="max-w-[640px] text-texto-2">
         Este usuario se conecta por la API o el servidor MCP del taller (por ejemplo, el sistema del concesionario).
         Pida a un administrador otro rol si necesita usar el tablero.
       </p>

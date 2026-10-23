@@ -142,13 +142,13 @@ export function EditorDiagnostico({
                 <div className="flex flex-wrap items-center justify-between gap-8">
                   <p className="mono">Paso {i + 1}</p>
                   <div className="flex gap-8">
-                    <Boton variante="fantasma" sobre="claro" onClick={() => mover(i, -1)} disabled={i === 0} aria-label={`Subir paso ${i + 1}`}>
+                    <Boton variante="contorno" onClick={() => mover(i, -1)} disabled={i === 0} aria-label={`Subir paso ${i + 1}`}>
                       ↑
                     </Boton>
-                    <Boton variante="fantasma" sobre="claro" onClick={() => mover(i, 1)} disabled={i === tareas.length - 1} aria-label={`Bajar paso ${i + 1}`}>
+                    <Boton variante="contorno" onClick={() => mover(i, 1)} disabled={i === tareas.length - 1} aria-label={`Bajar paso ${i + 1}`}>
                       ↓
                     </Boton>
-                    <Boton variante="fantasma" sobre="claro" onClick={() => setTareas((ts) => ts.filter((x) => x.clave !== t.clave))} aria-label={`Quitar paso ${i + 1}`}>
+                    <Boton variante="contorno" onClick={() => setTareas((ts) => ts.filter((x) => x.clave !== t.clave))} aria-label={`Quitar paso ${i + 1}`}>
                       Quitar
                     </Boton>
                   </div>
@@ -159,8 +159,8 @@ export function EditorDiagnostico({
                   <Entrada etiqueta="Valor del servicio" type="number" min={0} step={1000} value={t.valorServicio} onChange={(e) => cambiarTarea(t.clave, { valorServicio: e.target.value })} ayuda="Precio fijo, aparte de las horas" />
                 </div>
 
-                <div className="flex flex-col gap-16 border-t border-pale-stone pt-16">
-                  <p className="mono text-graphite-mid">Repuestos {t.repuestos.length ? `(${t.repuestos.length})` : '· no requiere'}</p>
+                <div className="flex flex-col gap-16 border-t border-borde pt-16">
+                  <p className="mono text-texto-2">Repuestos {t.repuestos.length ? `(${t.repuestos.length})` : '· no requiere'}</p>
                   {t.repuestos.map((r) => {
                     const item = items.find((x) => x.id === r.itemId);
                     return (
@@ -187,7 +187,7 @@ export function EditorDiagnostico({
                           onChange={(e) => cambiarRepuesto(t, r.clave, { cantidad: e.target.value })}
                           ayuda={item && item.cantidad < aNumero(r.cantidad) ? 'No alcanza: se pedirá' : undefined}
                         />
-                        <Boton variante="fantasma" sobre="claro" onClick={() => cambiarTarea(t.clave, { repuestos: t.repuestos.filter((x) => x.clave !== r.clave) })}>
+                        <Boton variante="contorno" onClick={() => cambiarTarea(t.clave, { repuestos: t.repuestos.filter((x) => x.clave !== r.clave) })}>
                           Quitar
                         </Boton>
                       </div>
@@ -195,16 +195,16 @@ export function EditorDiagnostico({
                   })}
                   <div className="flex flex-wrap gap-8">
                     <Boton
-                      variante="fantasma"
-                      sobre="claro"
+                      variante="contorno"
+                     
                       disabled={items.length === 0}
                       onClick={() => cambiarTarea(t.clave, { repuestos: [...t.repuestos, { clave: nuevaClave(), itemId: items[0]?.id ?? null, descripcion: '', cantidad: '1', precioUnitario: '0' }] })}
                     >
                       + Del inventario
                     </Boton>
                     <Boton
-                      variante="fantasma"
-                      sobre="claro"
+                      variante="contorno"
+                     
                       onClick={() => cambiarTarea(t.clave, { repuestos: [...t.repuestos, { clave: nuevaClave(), itemId: null, descripcion: '', cantidad: '1', precioUnitario: '0' }] })}
                     >
                       + Pieza que no hay
@@ -215,7 +215,7 @@ export function EditorDiagnostico({
             </li>
           ))}
         </ol>
-        <Boton variante="oscuro" onClick={() => setTareas((ts) => [...ts, tareaVacia()])}>
+        <Boton variante="contorno" onClick={() => setTareas((ts) => [...ts, tareaVacia()])}>
           + Agregar paso
         </Boton>
       </div>
@@ -227,11 +227,11 @@ export function EditorDiagnostico({
           <Metrica etiqueta="Repuestos" valor={pesos(costo.repuestos)} />
           <Metrica etiqueta="Total" valor={<span data-testid="total">{pesos(costo.total)}</span>} />
         </Ventana>
-        <Boton variante="claro" onClick={guardar} disabled={ocupado || tareas.length === 0}>
+        <Boton variante="primario" onClick={guardar} disabled={ocupado || tareas.length === 0}>
           {ocupado ? 'Guardando…' : 'Guardar borrador'}
         </Boton>
         <Boton
-          variante="fantasma"
+          variante="contorno"
           disabled={ocupado || tareas.length === 0}
           onClick={() =>
             ejecutar(async () => {
@@ -253,16 +253,16 @@ function Lectura({ d }: { d: Diagnostico }) {
   return (
     <div className="grid gap-40 lg:grid-cols-[2fr_1fr]">
       <div className="flex min-w-0 flex-col gap-24">
-        {d.observaciones && <p className="text-warm-granite">{d.observaciones}</p>}
+        {d.observaciones && <p className="text-texto-2">{d.observaciones}</p>}
         <ol className="flex flex-col">
           {d.tareas.map((t) => (
-            <li key={t.id} className="border-b border-carbon-lift py-16">
+            <li key={t.id} className="border-b border-borde py-16">
               <div className="flex flex-wrap justify-between gap-8">
                 <p>
-                  <span className="mono mr-8 text-pale-stone">{t.posicion}</span>
+                  <span className="mono mr-8 text-texto-3">{t.posicion}</span>
                   {t.descripcion}
                 </p>
-                <p className="mono text-warm-granite">
+                <p className="mono text-texto-2">
                   {horas(t.horasEstimadas)} · {pesos(t.valorServicio)}
                 </p>
               </div>
@@ -271,11 +271,11 @@ function Lectura({ d }: { d: Diagnostico }) {
                   {t.repuestos.map((r) => (
                     <li key={r.id} className="flex flex-wrap items-center justify-between gap-8">
                       <span>
-                        {r.cantidad} × {r.descripcion} {r.codigo && <span className="text-warm-granite">({r.codigo})</span>}
+                        {r.cantidad} × {r.descripcion} {r.codigo && <span className="text-texto-2">({r.codigo})</span>}
                       </span>
                       <span className="flex items-center gap-16">
                         {pesos(r.cantidad * r.precioUnitario)}
-                        <Etiqueta tono={r.disponible ? 'listo' : 'vivo'}>{r.disponible ? 'En stock' : 'Pedir'}</Etiqueta>
+                        <Etiqueta tono={r.disponible ? "listo" : "alerta"}>{r.disponible ? 'En stock' : 'Pedir'}</Etiqueta>
                       </span>
                     </li>
                   ))}
@@ -314,7 +314,7 @@ export function DiagnosticoPagina() {
     <>
       <Encabezado ceja={`Orden ${codigo} · ${orden.datos.vehiculo.placa} · ${d.mecanico}`} titulo="Diagnóstico">
         <EstadoOrden estado={d.estadoOrden} />
-        <Link to={`/ordenes/${codigo}`} className="flex h-36 items-center px-14 text-body-sm text-pale-stone hover:text-chalk">
+        <Link to={`/ordenes/${codigo}`} className="flex h-36 items-center px-14 text-body-sm text-texto-3 hover:underline">
           Volver a la orden
         </Link>
       </Encabezado>

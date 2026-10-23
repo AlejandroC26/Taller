@@ -5,5 +5,7 @@ import { afterEach, vi } from 'vitest';
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
+  localStorage.clear();
+  delete document.documentElement.dataset.tema;
   vi.restoreAllMocks();
 });

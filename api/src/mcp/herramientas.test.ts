@@ -66,6 +66,13 @@ describe('herramientas por rol', () => {
 describe('servidor MCP', () => {
   beforeEach(() => vi.clearAllMocks());
 
+  it('se presenta con el nombre del taller y el usuario', async () => {
+    const cliente = await conectar('mecanico');
+    expect(cliente.getInstructions()).toContain('Taller Pulgas Locas');
+    expect(cliente.getInstructions()).toContain('rol mecanico');
+    await cliente.close();
+  });
+
   it('lista exactamente las herramientas del rol, con sus anotaciones', async () => {
     const cliente = await conectar('mecanico');
     const { tools } = await cliente.listTools();

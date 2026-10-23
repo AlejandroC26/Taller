@@ -1,5 +1,6 @@
 import type { EntityManager } from 'typeorm';
 import { bd } from '../base-datos/conexion';
+import { NOMBRE_TALLER } from '../config';
 import { pesos } from '../comun/columnas';
 import { invalido, noEncontrado } from '../comun/errores';
 import { buscarDiagnostico } from '../diagnosticos/diagnosticos.service';
@@ -175,6 +176,7 @@ export async function terminarReparacion(actor: Actor, codigo: string) {
     await transicionar(tx, orden, 'terminado', actor, `Total ${real.total}`);
     const cliente = orden.vehiculo.cliente;
     await encolar(tx, 'facturacion', 'emitir_factura', {
+      taller: NOMBRE_TALLER,
       orden: codigoOrden(orden.id),
       cliente: { documento: cliente.documento, nombre: nombreDe(cliente), correo: cliente.correo, telefono: cliente.telefono },
       vehiculo: { placa: orden.vehiculo.placa, marca: orden.vehiculo.marca, modelo: orden.vehiculo.modelo },

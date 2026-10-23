@@ -48,6 +48,12 @@ describe('ruta protegida', () => {
 });
 
 describe('pantalla de entrada', () => {
+  it('muestra el logo y el nombre del taller', () => {
+    renderizar(<Entrar />);
+    expect(screen.getByAltText('Logo del Taller Pulgas Locas')).toBeInTheDocument();
+    expect(screen.getByText(/Taller Pulgas Locas · Mecánica general/)).toBeInTheDocument();
+  });
+
   it('con credenciales válidas guarda el token y va al inicio del rol', async () => {
     const { llamadas } = renderizar(<Entrar />, {
       rutas: { 'POST /api/auth/entrar': { token: 'nuevo-token', usuario: actorDe('mecanico') } },

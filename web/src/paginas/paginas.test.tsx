@@ -124,8 +124,8 @@ describe('inventario', () => {
   it('marca los ítems en alerta y el mecánico no puede crear', async () => {
     renderizar(<Inventario />, { actor: actorDe('mecanico'), rutas: { '/api/inventario': items, '/api/categorias': [] } });
     const fila = (await screen.findByText('Batería')).closest('tr')!;
-    expect(within(fila).getByText('Alerta')).toHaveAttribute('data-tono', 'vivo');
-    expect(screen.getByText('1 ítems en alerta')).toBeInTheDocument();
+    expect(within(fila).getByText('Alerta')).toHaveAttribute('data-tono', 'alerta');
+    expect(screen.getByText('1 ítem en alerta')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Nuevo ítem' })).not.toBeInTheDocument();
   });
 

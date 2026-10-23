@@ -184,7 +184,6 @@ export interface RolInfo {
   id: number;
   nombre: string;
   descripcion: string;
-  sistema: boolean;
   usuarios: number;
 }
 

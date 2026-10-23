@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { costoEstimado } from './costos';
-import { aEntradaLocal, NOMBRE_ESTADO, pesos, tonoDe } from './formato';
+import { aEntradaLocal, cuenta, NOMBRE_ESTADO, nombreRol, pesos, tonoDe } from './formato';
 import { enlacesDe, inicioDe, puede } from './permisos';
 
 describe('formato', () => {
@@ -9,13 +9,26 @@ describe('formato', () => {
     expect(pesos(null)).toMatch(/0/);
   });
 
-  it('el tono del estado: naranja en curso, verde listo, neutro el resto', () => {
-    expect(tonoDe('en_diagnostico')).toBe('vivo');
-    expect(tonoDe('en_reparacion')).toBe('vivo');
+  it('el tono del estado: azul en progreso, violeta por aprobar, teal aprobado, menta listo', () => {
+    expect(tonoDe('en_diagnostico')).toBe('progreso');
+    expect(tonoDe('en_reparacion')).toBe('progreso');
+    expect(tonoDe('diagnosticado')).toBe('revision');
+    expect(tonoDe('aprobado')).toBe('aprobado');
     expect(tonoDe('terminado')).toBe('listo');
     expect(tonoDe('entregado')).toBe('listo');
     expect(tonoDe('cancelado')).toBe('neutro');
     expect(tonoDe('recibido')).toBe('neutro');
+  });
+
+  it('cuenta en singular o plural', () => {
+    expect(cuenta(1, 'paso', 'pasos')).toBe('1 paso');
+    expect(cuenta(0, 'paso', 'pasos')).toBe('0 pasos');
+    expect(cuenta(3, 'ítem', 'ítems')).toBe('3 ítems');
+  });
+
+  it('nombra los roles con tilde y deja intacto uno desconocido', () => {
+    expect(nombreRol('mecanico')).toBe('Mecánico');
+    expect(nombreRol('otro')).toBe('otro');
   });
 
   it('nombra los estados en español', () => {

@@ -1,5 +1,6 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
+import { NOMBRE_TALLER } from '../config';
 import { crearCliente, crearVehiculo, listarClientes } from '../clientes/clientes.service';
 import { clienteDto, vehiculoDto } from '../clientes/dto';
 import { validar } from '../comun/http';
@@ -117,7 +118,7 @@ export function crearServidorMcp(actor: Actor): McpServer {
     { name: 'taller', version: '1.0.0' },
     {
       instructions:
-        'Herramientas del Taller mecánico (órdenes de servicio, diagnóstico, reparación e inventario). ' +
+        `Herramientas del ${NOMBRE_TALLER}, mecánica general (órdenes de servicio, diagnóstico, reparación e inventario). ` +
         `Usuario: ${actor.nombre} ${actor.apellido}, rol ${actor.rol}. ` +
         'Los montos están en pesos colombianos. Antes de cancelar una orden o registrar ' +
         'partes usadas, confirme con el usuario el código y las cantidades.',

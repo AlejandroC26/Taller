@@ -32,15 +32,6 @@ export const editarUsuarioDto = nuevoUsuarioDto
   .partial()
   .extend({ clave: clave.optional(), activo: z.boolean().optional() });
 
-export const rolDto = z.object({
-  nombre: z
-    .string()
-    .trim()
-    .toLowerCase()
-    .regex(/^[a-z_]{3,40}$/, 'Nombre del rol: de 3 a 40 letras minúsculas o guion bajo'),
-  descripcion: z.string().trim().max(200).default(''),
-});
-
 export const editarRolDto = z.object({ descripcion: z.string().trim().max(200) });
 
 export type NuevoUsuario = z.infer<typeof nuevoUsuarioDto>;

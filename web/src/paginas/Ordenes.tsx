@@ -6,6 +6,7 @@ import { ESTADOS } from '../api/tipos';
 import type { Orden, OrdenDetalle } from '../api/tipos';
 import { Boton } from '../componentes/Boton';
 import { aNumero, Area, Entrada, Seleccion } from '../componentes/Campos';
+import { GrupoAvatares } from '../componentes/Avatar';
 import { EstadoOrden } from '../componentes/Etiqueta';
 import { Aviso, Cargando, Encabezado, Tarjeta } from '../componentes/Superficies';
 import { Celda, Fila, Tabla } from '../componentes/Tabla';
@@ -41,15 +42,15 @@ export function NuevaOrden({ alCrear, alCerrar }: { alCrear: (o: OrdenDetalle) =
   return (
     <Tarjeta className="mb-40">
       <form onSubmit={enviar} className="grid gap-16 md:grid-cols-[1fr_1fr_2fr]">
-        <h2 className="text-heading md:col-span-3">Nueva orden de servicio</h2>
+        <h2 className="text-subheading md:col-span-3">Nueva orden de servicio</h2>
         <Entrada etiqueta="Placa" value={placa} onChange={(e) => setPlaca(e.target.value)} placeholder="ABC123" required />
         <Entrada etiqueta="Kilometraje" type="number" min={0} value={kilometraje} onChange={(e) => setKilometraje(e.target.value)} />
         <Area etiqueta="Motivo de ingreso" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Lo que reporta el cliente" required rows={2} />
         <div className="flex flex-wrap items-center gap-16 md:col-span-3">
-          <Boton type="submit" variante="tinta" disabled={ocupado}>
+          <Boton type="submit" variante="primario" disabled={ocupado}>
             {ocupado ? 'Creando…' : 'Abrir orden'}
           </Boton>
-          <Boton variante="fantasma" sobre="claro" onClick={alCerrar}>
+          <Boton variante="contorno" onClick={alCerrar}>
             Cerrar
           </Boton>
           {error && (
@@ -94,7 +95,7 @@ export function Ordenes() {
     <>
       <Encabezado ceja={gestiona ? 'Recepción' : 'Asignadas a usted'} titulo="Órdenes de servicio">
         {gestiona && !creando && (
-          <Boton variante="claro" onClick={() => setCreando(true)}>
+          <Boton variante="primario" onClick={() => setCreando(true)}>
             Nueva orden
           </Boton>
         )}
@@ -108,8 +109,8 @@ export function Ordenes() {
           cambiar('buscar', texto.trim());
         }}
       >
-        <Entrada sobre="oscuro" etiqueta="Buscar" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Placa, cliente o código" />
-        <Seleccion sobre="oscuro" etiqueta="Estado" value={estado} onChange={(e) => cambiar('estado', e.target.value)}>
+        <Entrada etiqueta="Buscar" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Placa, cliente o código" />
+        <Seleccion etiqueta="Estado" value={estado} onChange={(e) => cambiar('estado', e.target.value)}>
           <option value="">Todos</option>
           {ESTADOS.map((e) => (
             <option key={e} value={e}>
@@ -130,7 +131,7 @@ export function Ordenes() {
               <Celda className="mono">{o.codigo}</Celda>
               <Celda>
                 <span className="block">{o.vehiculo.placa}</span>
-                <span className="text-warm-granite">
+                <span className="text-texto-2">
                   {o.vehiculo.marca} {o.vehiculo.modelo}
                 </span>
               </Celda>
@@ -138,8 +139,10 @@ export function Ordenes() {
               <Celda>
                 <EstadoOrden estado={o.estado} />
               </Celda>
-              <Celda className="text-warm-granite">{[...new Set(o.asignaciones.map((a) => a.mecanico))].join(', ') || '—'}</Celda>
-              <Celda className="text-warm-granite">{fecha(o.actualizadoEn)}</Celda>
+              <Celda>
+                <GrupoAvatares nombres={o.asignaciones.map((a) => a.mecanico)} />
+              </Celda>
+              <Celda className="text-texto-2">{fecha(o.actualizadoEn)}</Celda>
             </Fila>
           ))}
         </Tabla>

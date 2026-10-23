@@ -1,34 +1,31 @@
 import type { ButtonHTMLAttributes } from 'react';
 
-// Botones de DESIGN.md: radio de 3 px, Geist 14 px, rellenos neutros. Nunca con color de
-// marca: el naranja y el verde son solo para estados.
-//   oscuro:   acción en superficies oscuras (#1d1a18)
-//   claro:    acción de alto énfasis en oscuro (#fafafa, texto #101010)
-//   tinta:    acción dentro de una tarjeta clara (#101010, texto #eeeeee)
-//   fantasma: secundaria, solo borde; sobre="claro" dentro de tarjetas claras
-type Variante = 'oscuro' | 'claro' | 'tinta' | 'fantasma';
+// Botones de DESIGN.md: siempre píldora (9999px), Plus Jakarta Sans 14 px en 700.
+//   primario: la acción principal — relleno #202020 (en oscuro, Mist #f8f9fa)
+//   contorno: secundaria — borde #e8e8e8, sin relleno
+//   azul:     acción interactiva con borde azul (#0091ff); nunca como acción principal
+//   suave:    compacta, para filas y barras (fondo sutil)
+// El violeta de marca nunca rellena un botón.
+type Variante = 'primario' | 'contorno' | 'azul' | 'suave';
 
 const VARIANTES: Record<Variante, string> = {
-  oscuro: 'bg-carbon-lift text-bone hover:bg-graphite-mid',
-  claro: 'bg-chalk text-obsidian-canvas hover:bg-bone',
-  tinta: 'bg-obsidian-canvas text-bone hover:bg-carbon-lift',
-  fantasma: 'border border-ash-stroke text-bone hover:border-chalk hover:text-chalk',
+  primario: 'h-40 px-24 bg-accion text-accion-texto hover:opacity-85',
+  contorno: 'h-40 px-20 border border-borde bg-lienzo text-texto hover:bg-sutil',
+  azul: 'h-40 px-20 border border-signal-blue text-signal-blue hover:bg-signal-blue/5',
+  suave: 'h-32 px-12 bg-sutil text-texto hover:bg-chip',
 };
 
-const FANTASMA_CLARO = 'border border-pale-stone text-obsidian-canvas hover:border-obsidian-canvas';
-
 export function Boton({
-  variante = 'oscuro',
-  sobre = 'oscuro',
+  variante = 'contorno',
   className = '',
   type = 'button',
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variante?: Variante; sobre?: 'oscuro' | 'claro' }) {
-  const color = variante === 'fantasma' && sobre === 'claro' ? FANTASMA_CLARO : VARIANTES[variante];
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variante?: Variante }) {
   return (
     <button
       type={type}
-      className={`inline-flex h-36 cursor-pointer items-center justify-center gap-8 rounded-sm px-14 text-body-sm whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50 ${color} ${className}`}
+      data-variante={variante}
+      className={`inline-flex cursor-pointer items-center justify-center gap-8 rounded-full font-plus-jakarta-sans text-body-sm font-bold whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-40 ${VARIANTES[variante]} ${className}`}
       {...props}
     />
   );

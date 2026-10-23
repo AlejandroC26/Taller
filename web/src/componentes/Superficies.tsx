@@ -1,84 +1,66 @@
 import type { ReactNode } from 'react';
 import { Pulso } from './Etiqueta';
 
-// Tarjeta clara (#eeeeee sobre #101010): la figura sobre el fondo. Aquí van los
-// formularios. Sin sombras: la profundidad es el contraste.
+// Tarjeta: superficie Card (#f8f9fa) con borde de 1 px #e8e8e8, radio 12 px y 28 px de
+// padding. Aquí van los formularios. Plana: la jerarquía es el borde, no la sombra.
 export function Tarjeta({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return (
-    <section className={`superficie-clara rounded-lg bg-bone p-24 text-obsidian-canvas ${className}`}>{children}</section>
-  );
+  return <section className={`rounded-xl border border-borde bg-tarjeta p-28 ${className}`}>{children}</section>;
 }
 
-// Tarjeta oscura: solo el borde de 1 px la dibuja.
+// Tarjeta sobre el lienzo, para listas de elementos.
 export function Contorno({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <section className={`rounded-lg border border-carbon-lift p-20 ${className}`}>{children}</section>;
+  return <section className={`rounded-xl border border-borde bg-lienzo p-24 ${className}`}>{children}</section>;
 }
 
-// Marco tipo ventana para los tableros: barra con puntos y título en Mono.
+// Panel tipo «captura del producto»: la única superficie con sombra suave (DESIGN.md:
+// la excepción que despega la captura del lienzo).
 export function Ventana({ titulo, children }: { titulo: string; children: ReactNode }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-carbon-lift bg-[#0d0d0d]">
-      <header className="flex h-40 items-center gap-8 border-b border-carbon-lift px-16">
-        <span className="size-8 rounded-full bg-graphite-mid" />
-        <span className="size-8 rounded-full bg-graphite-mid" />
-        <span className="size-8 rounded-full bg-graphite-mid" />
-        <span className="mono ml-8 flex items-center gap-8 text-pale-stone">
-          <Pulso />
-          {titulo}
-        </span>
+    <section className="overflow-hidden rounded-2xl-2 border border-borde bg-lienzo shadow-subtle-2">
+      <header className="flex h-48 items-center gap-8 border-b border-borde px-20">
+        <span className="size-10 rounded-full bg-cloud dark:bg-carbon" />
+        <span className="size-10 rounded-full bg-cloud dark:bg-carbon" />
+        <span className="size-10 rounded-full bg-cloud dark:bg-carbon" />
+        <span className="mono ml-8 text-texto-3">{titulo}</span>
       </header>
       {children}
     </section>
   );
 }
 
-// Título de sección en Mono, con el pulso opcional.
-export function Ceja({ children, pulso = false, className = '' }: { children: ReactNode; pulso?: boolean; className?: string }) {
-  return (
-    <p className={`mono flex items-center gap-8 text-pale-stone ${className}`}>
-      {pulso && <Pulso />}
-      {children}
-    </p>
-  );
+// Etiqueta de sección: Sometype Mono en mayúsculas, gris terciario.
+export function Ceja({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <p className={`mono text-texto-3 ${className}`}>{children}</p>;
 }
 
-export function Encabezado({
-  ceja,
-  titulo,
-  children,
-}: {
-  ceja: string;
-  titulo: ReactNode;
-  children?: ReactNode;
-}) {
+export function Encabezado({ ceja, titulo, children }: { ceja: string; titulo: ReactNode; children?: ReactNode }) {
   return (
     <header className="mb-40 flex flex-wrap items-end justify-between gap-24">
       <div className="min-w-0">
-        <Ceja pulso className="mb-16">
-          {ceja}
-        </Ceja>
-        <h1 className="text-heading md:text-heading-lg">{titulo}</h1>
+        <Ceja className="mb-12">{ceja}</Ceja>
+        <h1 className="text-heading-sm md:text-heading">{titulo}</h1>
       </div>
-      {children && <div className="flex flex-wrap gap-8">{children}</div>}
+      {children && <div className="flex flex-wrap items-center gap-12">{children}</div>}
     </header>
   );
 }
 
+// Dato grande (DESIGN.md: «Stat Callout»): número en Plus Jakarta 700, leyenda en Inter.
 export function Metrica({ etiqueta, valor, detalle }: { etiqueta: string; valor: ReactNode; detalle?: ReactNode }) {
   return (
-    <div className="border-b border-carbon-lift p-20 sm:border-r">
-      <p className="mono text-pale-stone">{etiqueta}</p>
-      <p className="mt-16 text-heading break-words">{valor}</p>
-      {detalle && <p className="mt-8 text-body-sm text-warm-granite">{detalle}</p>}
+    <div className="border-b border-borde p-28 sm:border-r">
+      <p className="mono text-texto-3">{etiqueta}</p>
+      <p className="mt-12 font-plus-jakarta-sans text-heading-sm font-bold break-words text-titulo">{valor}</p>
+      {detalle && <div className="mt-8 text-body-sm text-texto-2">{detalle}</div>}
     </div>
   );
 }
 
 export function Aviso({ children, tipo = 'error' }: { children: ReactNode; tipo?: 'error' | 'info' }) {
   return (
-    <p role={tipo === 'error' ? 'alert' : 'status'} className="flex items-start gap-8 text-body-sm">
+    <p role={tipo === 'error' ? 'alert' : 'status'} className="flex items-start gap-8 text-body-sm text-texto">
       <span className="mt-6">
-        <Pulso tono={tipo === 'error' ? 'vivo' : 'neutro'} />
+        <Pulso tono={tipo === 'error' ? 'alerta' : 'listo'} />
       </span>
       <span>{children}</span>
     </p>
@@ -87,7 +69,7 @@ export function Aviso({ children, tipo = 'error' }: { children: ReactNode; tipo?
 
 export function Cargando({ texto = 'Cargando' }: { texto?: string }) {
   return (
-    <p className="mono flex items-center gap-8 py-40 text-warm-granite" role="status">
+    <p className="mono flex items-center gap-8 py-40 text-texto-3" role="status">
       <Pulso /> {texto}…
     </p>
   );

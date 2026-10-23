@@ -3,22 +3,37 @@ import type { Estado } from '../api/tipos';
 import { NOMBRE_ESTADO, tonoDe } from '../logica/formato';
 import type { Tono } from '../logica/formato';
 
-const PUNTO: Record<Tono, string> = {
-  vivo: 'bg-signal-orange',
-  listo: 'bg-metric-green',
-  neutro: 'bg-warm-granite',
+// Píldoras de estado de DESIGN.md: azul con texto blanco = en progreso, menta con texto
+// oscuro = hecho, violeta = espera validación, teal = aprobado, magenta = alerta.
+const PILDORA: Record<Tono, string> = {
+  progreso: 'bg-signal-blue text-signal-white',
+  listo: 'bg-mint text-ink-black',
+  revision: 'bg-brand-violet text-signal-white',
+  aprobado: 'bg-teal-tag text-ink-black',
+  alerta: 'bg-alerta text-ink-black',
+  neutro: 'bg-chip text-texto-2',
 };
 
-// Pulso de estado: círculo de 6 px antes del texto.
-export function Pulso({ tono = 'vivo' }: { tono?: Tono }) {
-  return <span aria-hidden className={`inline-block size-6 shrink-0 rounded-full ${PUNTO[tono]}`} />;
+const PUNTO: Record<Tono, string> = {
+  progreso: 'bg-signal-blue',
+  listo: 'bg-emerald',
+  revision: 'bg-brand-violet',
+  aprobado: 'bg-teal-tag',
+  alerta: 'bg-alerta',
+  neutro: 'bg-texto-3',
+};
+
+// Punto de color de 8 px, para avisos y mensajes cortos.
+export function Pulso({ tono = 'progreso' }: { tono?: Tono }) {
+  return <span aria-hidden className={`inline-block size-8 shrink-0 rounded-full ${PUNTO[tono]}`} />;
 }
 
-// Etiqueta de instrumento: Geist Mono 12 px en mayúsculas con su pulso.
 export function Etiqueta({ tono = 'neutro', children }: { tono?: Tono; children: ReactNode }) {
   return (
-    <span className="mono inline-flex items-center gap-8 whitespace-nowrap" data-tono={tono}>
-      <Pulso tono={tono} />
+    <span
+      data-tono={tono}
+      className={`inline-flex items-center rounded-full px-10 py-3 text-[12px] leading-[1.4] font-semibold whitespace-nowrap ${PILDORA[tono]}`}
+    >
       {children}
     </span>
   );

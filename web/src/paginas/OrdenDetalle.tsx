@@ -6,7 +6,7 @@ import { Boton } from '../componentes/Boton';
 import { Area, Seleccion } from '../componentes/Campos';
 import { EstadoOrden } from '../componentes/Etiqueta';
 import { Aviso, Cargando, Ceja, Contorno, Encabezado, Tarjeta } from '../componentes/Superficies';
-import { fecha, NOMBRE_ESTADO, numero, pesos } from '../logica/formato';
+import { cuenta, fecha, NOMBRE_ESTADO, numero, pesos } from '../logica/formato';
 import { puede } from '../logica/permisos';
 import { usarAccion, usarDatos } from '../logica/usarDatos';
 import { usarSesion } from '../sesion/sesion';
@@ -35,7 +35,7 @@ function Acciones({ orden, alCambiar }: { orden: OrdenDetalle; alCambiar: (o: Or
 
   return (
     <Tarjeta className="flex flex-col gap-24">
-      <h2 className="text-heading">Acciones</h2>
+      <h2 className="text-subheading">Acciones</h2>
       {etapa && (
         <form
           className="flex flex-col gap-16"
@@ -58,7 +58,7 @@ function Acciones({ orden, alCambiar }: { orden: OrdenDetalle; alCambiar: (o: Or
               </option>
             ))}
           </Seleccion>
-          <Boton type="submit" variante="tinta" disabled={ocupado || !mecanicoId}>
+          <Boton type="submit" variante="primario" disabled={ocupado || !mecanicoId}>
             Asignar
           </Boton>
         </form>
@@ -68,45 +68,45 @@ function Acciones({ orden, alCambiar }: { orden: OrdenDetalle; alCambiar: (o: Or
           <p className="text-body-sm">
             Costo estimado: <strong className="font-medium">{pesos(orden.diagnostico?.costo.total)}</strong>
           </p>
-          <Boton variante="tinta" disabled={ocupado} onClick={() => hacer(() => api(`${ruta}/estado`, { metodo: 'POST', cuerpo: { estado: 'aprobado', nota: 'El cliente aprobó el costo' } }))}>
+          <Boton variante="primario" disabled={ocupado} onClick={() => hacer(() => api(`${ruta}/estado`, { metodo: 'POST', cuerpo: { estado: 'aprobado', nota: 'El cliente aprobó el costo' } }))}>
             El cliente aprobó
           </Boton>
         </div>
       )}
       {orden.estado === 'terminado' && (
-        <Boton variante="tinta" disabled={ocupado} onClick={() => hacer(() => api(`${ruta}/estado`, { metodo: 'POST', cuerpo: { estado: 'entregado' } }))}>
+        <Boton variante="primario" disabled={ocupado} onClick={() => hacer(() => api(`${ruta}/estado`, { metodo: 'POST', cuerpo: { estado: 'entregado' } }))}>
           Entregar al cliente
         </Boton>
       )}
       {CANCELABLES.includes(orden.estado) &&
         (cancelando ? (
           <form
-            className="flex flex-col gap-16 border-t border-pale-stone pt-24"
+            className="flex flex-col gap-16 border-t border-borde pt-24"
             onSubmit={(e) => {
               e.preventDefault();
               void hacer(() => api(`${ruta}/cancelar`, { metodo: 'POST', cuerpo: { motivo } }));
             }}
           >
             <Area etiqueta="Motivo de la cancelación" value={motivo} onChange={(e) => setMotivo(e.target.value)} required minLength={5} />
-            <p className="text-caption text-graphite-mid">
+            <p className="text-[12px] text-texto-2">
               Se cancela {orden.estado === 'en_reparacion' ? 'la reparación' : 'el diagnóstico'} en curso. No se puede deshacer.
             </p>
             <div className="flex gap-8">
-              <Boton type="submit" variante="tinta" disabled={ocupado}>
+              <Boton type="submit" variante="primario" disabled={ocupado}>
                 Confirmar cancelación
               </Boton>
-              <Boton variante="fantasma" sobre="claro" onClick={() => setCancelando(false)}>
+              <Boton variante="contorno" onClick={() => setCancelando(false)}>
                 Volver
               </Boton>
             </div>
           </form>
         ) : (
-          <Boton variante="fantasma" sobre="claro" onClick={() => setCancelando(true)}>
+          <Boton variante="contorno" onClick={() => setCancelando(true)}>
             Cancelar {orden.estado === 'en_reparacion' ? 'reparación' : 'orden'}
           </Boton>
         ))}
       {!etapa && orden.estado !== 'diagnosticado' && orden.estado !== 'terminado' && !CANCELABLES.includes(orden.estado) && (
-        <p className="text-body-sm text-graphite-mid">La orden está cerrada.</p>
+        <p className="text-body-sm text-texto-2">La orden está cerrada.</p>
       )}
       {error && <Aviso>{error}</Aviso>}
     </Tarjeta>
@@ -133,7 +133,7 @@ export function OrdenDetallePagina() {
             <div>
               <Ceja className="mb-8">Cliente</Ceja>
               <p>{orden.cliente.nombre}</p>
-              <p className="text-body-sm text-warm-granite">
+              <p className="text-body-sm text-texto-2">
                 {orden.cliente.documento} · {orden.cliente.telefono}
               </p>
             </div>
@@ -142,12 +142,12 @@ export function OrdenDetallePagina() {
               <p>
                 {orden.vehiculo.anio} · {orden.vehiculo.color || 'Sin color'}
               </p>
-              <p className="text-body-sm text-warm-granite">{numero(orden.kilometraje ?? orden.vehiculo.kilometraje)} km</p>
+              <p className="text-body-sm text-texto-2">{numero(orden.kilometraje ?? orden.vehiculo.kilometraje)} km</p>
             </div>
             <div className="sm:col-span-2">
               <Ceja className="mb-8">Motivo de ingreso</Ceja>
               <p>{orden.motivo}</p>
-              {orden.motivoCancelacion && <p className="mt-8 text-body-sm text-warm-granite">Cancelada: {orden.motivoCancelacion}</p>}
+              {orden.motivoCancelacion && <p className="mt-8 text-body-sm text-texto-2">Cancelada: {orden.motivoCancelacion}</p>}
             </div>
           </section>
 
@@ -156,30 +156,30 @@ export function OrdenDetallePagina() {
               <Ceja className="mb-16">Diagnóstico</Ceja>
               {orden.diagnostico ? (
                 <>
-                  <p className="text-heading">{pesos(orden.diagnostico.costo.total)}</p>
-                  <p className="text-body-sm text-warm-granite">
-                    {orden.diagnostico.tareas} pasos · {orden.diagnostico.mecanico} · {orden.diagnostico.estado}
+                  <p className="font-plus-jakarta-sans text-heading-sm font-bold text-titulo">{pesos(orden.diagnostico.costo.total)}</p>
+                  <p className="text-body-sm text-texto-2">
+                    {cuenta(orden.diagnostico.tareas, 'paso', 'pasos')} · {orden.diagnostico.mecanico} · {orden.diagnostico.estado}
                   </p>
-                  <Link to={`/ordenes/${orden.codigo}/diagnostico`} className="mt-16 inline-block text-body-sm hover:text-chalk">
+                  <Link to={`/ordenes/${orden.codigo}/diagnostico`} className="mt-16 inline-block text-body-sm hover:underline">
                     Ver diagnóstico →
                   </Link>
                 </>
               ) : (
-                <p className="text-body-sm text-warm-granite">Se abre al asignar un mecánico de diagnóstico.</p>
+                <p className="text-body-sm text-texto-2">Se abre al asignar un mecánico de diagnóstico.</p>
               )}
             </Contorno>
             <Contorno>
               <Ceja className="mb-16">Reparación</Ceja>
               {orden.reparacion ? (
                 <>
-                  <p className="text-heading">{orden.reparacion.total !== null ? pesos(orden.reparacion.total) : 'En curso'}</p>
-                  <p className="text-body-sm text-warm-granite">Inició {fecha(orden.reparacion.iniciadaEn)}</p>
-                  <Link to={`/ordenes/${orden.codigo}/reparacion`} className="mt-16 inline-block text-body-sm hover:text-chalk">
+                  <p className="font-plus-jakarta-sans text-heading-sm font-bold text-titulo">{orden.reparacion.total !== null ? pesos(orden.reparacion.total) : 'En curso'}</p>
+                  <p className="text-body-sm text-texto-2">Inició {fecha(orden.reparacion.iniciadaEn)}</p>
+                  <Link to={`/ordenes/${orden.codigo}/reparacion`} className="mt-16 inline-block text-body-sm hover:underline">
                     Ver reparación →
                   </Link>
                 </>
               ) : (
-                <p className="text-body-sm text-warm-granite">Se abre al aprobar y asignar la reparación.</p>
+                <p className="text-body-sm text-texto-2">Se abre al aprobar y asignar la reparación.</p>
               )}
             </Contorno>
           </section>
@@ -187,13 +187,13 @@ export function OrdenDetallePagina() {
           <section>
             <Ceja className="mb-16">Mecánicos asignados</Ceja>
             {orden.asignaciones.length === 0 ? (
-              <p className="text-body-sm text-warm-granite">Sin asignar.</p>
+              <p className="text-body-sm text-texto-2">Sin asignar.</p>
             ) : (
               <ul className="flex flex-col">
                 {orden.asignaciones.map((a) => (
-                  <li key={a.id} className="flex justify-between border-b border-carbon-lift py-12 text-body-sm">
+                  <li key={a.id} className="flex justify-between border-b border-borde py-12 text-body-sm">
                     <span>{a.mecanico}</span>
-                    <span className="mono text-warm-granite">{a.etapa === 'diagnostico' ? 'Diagnóstico' : 'Reparación'}</span>
+                    <span className="mono text-texto-2">{a.etapa === 'diagnostico' ? 'Diagnóstico' : 'Reparación'}</span>
                   </li>
                 ))}
               </ul>
@@ -202,15 +202,15 @@ export function OrdenDetallePagina() {
 
           <section>
             <Ceja className="mb-16">Línea de tiempo</Ceja>
-            <ol className="flex flex-col border-l border-ash-stroke">
+            <ol className="flex flex-col border-l border-borde">
               {orden.historial.map((p, i) => (
                 <li key={i} className="relative pb-24 pl-24 last:pb-0">
-                  <span className="absolute top-6 -left-[4px] size-8 rounded-full bg-graphite-mid" />
-                  <p className="mono text-pale-stone">{NOMBRE_ESTADO[p.estado]}</p>
+                  <span className="absolute top-6 -left-[4px] size-8 rounded-full bg-cloud dark:bg-carbon" />
+                  <p className="mono text-texto-3">{NOMBRE_ESTADO[p.estado]}</p>
                   <p className="text-body-sm">
                     {fecha(p.fecha)} · {p.usuario}
                   </p>
-                  {p.nota && <p className="text-body-sm text-warm-granite">{p.nota}</p>}
+                  {p.nota && <p className="text-body-sm text-texto-2">{p.nota}</p>}
                 </li>
               ))}
             </ol>

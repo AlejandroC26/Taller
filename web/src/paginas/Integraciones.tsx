@@ -5,9 +5,10 @@ import { Etiqueta } from '../componentes/Etiqueta';
 import { Aviso, Cargando, Ceja, Contorno, Encabezado } from '../componentes/Superficies';
 import { Celda, Fila, Tabla } from '../componentes/Tabla';
 import { fecha } from '../logica/formato';
+import type { Tono } from '../logica/formato';
 import { usarAccion, usarDatos } from '../logica/usarDatos';
 
-const TONO: Record<string, 'vivo' | 'listo' | 'neutro'> = { enviado: 'listo', pendiente: 'vivo', fallido: 'vivo', desactivado: 'neutro' };
+const TONO: Record<string, Tono> = { enviado: 'listo', pendiente: 'progreso', fallido: 'alerta', desactivado: 'neutro' };
 
 // Los MCP de los otros proyectos (partes, facturación, concesionario) y la bandeja de
 // salida hacia ellos.
@@ -20,7 +21,7 @@ export function Integraciones() {
     <>
       <Encabezado ceja="Administración" titulo="Integraciones">
         <Boton
-          variante="claro"
+          variante="primario"
           disabled={accion.ocupado}
           onClick={async () => {
             await accion.ejecutar(() => api('/api/integraciones/reintentar', { metodo: 'POST' }));
@@ -39,23 +40,23 @@ export function Integraciones() {
                 <span className="mono">{d.destino}</span>
                 <Etiqueta tono={d.configurado ? 'listo' : 'neutro'}>{d.configurado ? 'Conectado' : 'Sin conectar'}</Etiqueta>
               </div>
-              <p className="text-body-sm text-warm-granite">{d.descripcion}</p>
+              <p className="text-body-sm text-texto-2">{d.descripcion}</p>
               <div>
                 <Ceja className="mb-8">Herramientas esperadas</Ceja>
                 <ul className="flex flex-col gap-8 text-body-sm">
                   {Object.keys(d.herramientas).map((h) => (
-                    <li key={h} className="mono text-bone">
+                    <li key={h} className="mono text-texto">
                       {h}
                     </li>
                   ))}
                 </ul>
               </div>
-              <p className="mt-auto text-caption text-warm-granite">
+              <p className="mt-auto text-[12px] text-texto-2">
                 {Object.entries(d.eventos)
                   .map(([estado, total]) => `${total} ${estado}`)
                   .join(' · ') || 'Sin eventos'}
               </p>
-              {!d.configurado && <p className="text-caption text-warm-granite">Defina MCP_{d.destino.toUpperCase()}_URL en SENA-IA/.env</p>}
+              {!d.configurado && <p className="text-[12px] text-texto-2">Defina MCP_{d.destino.toUpperCase()}_URL en SENA-IA/.env</p>}
             </Contorno>
           </li>
         ))}
@@ -71,8 +72,8 @@ export function Integraciones() {
               <Etiqueta tono={TONO[e.estado] ?? 'neutro'}>{e.estado}</Etiqueta>
             </Celda>
             <Celda>{e.intentos}</Celda>
-            <Celda className="text-warm-granite">{fecha(e.creadoEn)}</Celda>
-            <Celda className="text-warm-granite">{e.ultimoError ?? ''}</Celda>
+            <Celda className="text-texto-2">{fecha(e.creadoEn)}</Celda>
+            <Celda className="text-texto-2">{e.ultimoError ?? ''}</Celda>
           </Fila>
         ))}
       </Tabla>

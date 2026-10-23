@@ -7,6 +7,7 @@ import { Entrada, Seleccion } from '../componentes/Campos';
 import { Etiqueta } from '../componentes/Etiqueta';
 import { Aviso, Cargando, Encabezado, Tarjeta } from '../componentes/Superficies';
 import { Celda, Fila, Tabla } from '../componentes/Tabla';
+import { nombreRol } from '../logica/formato';
 import { usarAccion, usarDatos } from '../logica/usarDatos';
 import { usarSesion } from '../sesion/sesion';
 
@@ -28,7 +29,7 @@ function NuevoUsuario({ roles, alCrear }: { roles: RolInfo[]; alCrear: () => voi
   return (
     <Tarjeta className="mb-40">
       <form onSubmit={enviar} className="grid gap-16 sm:grid-cols-2 lg:grid-cols-4">
-        <h2 className="text-heading sm:col-span-2 lg:col-span-4">Nuevo usuario</h2>
+        <h2 className="text-subheading sm:col-span-2 lg:col-span-4">Nuevo usuario</h2>
         <Entrada etiqueta="Nombre" {...campo('nombre')} required />
         <Entrada etiqueta="Apellido" {...campo('apellido')} required />
         <Entrada etiqueta="Documento" {...campo('documento')} required />
@@ -38,12 +39,12 @@ function NuevoUsuario({ roles, alCrear }: { roles: RolInfo[]; alCrear: () => voi
         <Seleccion etiqueta="Rol" {...campo('rol')}>
           {roles.map((r) => (
             <option key={r.id} value={r.nombre}>
-              {r.nombre}
+              {nombreRol(r.nombre)}
             </option>
           ))}
         </Seleccion>
         <div className="flex items-end gap-16">
-          <Boton type="submit" variante="tinta" disabled={ocupado}>
+          <Boton type="submit" variante="primario" disabled={ocupado}>
             Crear usuario
           </Boton>
         </div>
@@ -72,7 +73,7 @@ export function Usuarios() {
     <>
       <Encabezado ceja="Administración" titulo="Usuarios">
         {!creando && (
-          <Boton variante="claro" onClick={() => setCreando(true)}>
+          <Boton variante="primario" onClick={() => setCreando(true)}>
             Nuevo usuario
           </Boton>
         )}
@@ -102,14 +103,14 @@ export function Usuarios() {
               <Celda>
                 <select
                   aria-label={`Rol de ${u.usuario}`}
-                  className="h-32 rounded-sm border border-ash-stroke bg-carbon-lift px-8 text-body-sm"
+                  className="h-32 rounded-sm border border-borde bg-tarjeta px-8 text-body-sm"
                   value={u.rol}
                   disabled={u.id === actor?.id || accion.ocupado}
                   onChange={(e) => editar(u.id, { rol: e.target.value })}
                 >
                   {(roles ?? []).map((r) => (
                     <option key={r.id} value={r.nombre}>
-                      {r.nombre}
+                      {nombreRol(r.nombre)}
                     </option>
                   ))}
                 </select>
@@ -119,7 +120,7 @@ export function Usuarios() {
               </Celda>
               <Celda>
                 {u.id !== actor?.id && (
-                  <Boton variante="fantasma" disabled={accion.ocupado} onClick={() => editar(u.id, { activo: !u.activo })}>
+                  <Boton variante="contorno" disabled={accion.ocupado} onClick={() => editar(u.id, { activo: !u.activo })}>
                     {u.activo ? 'Desactivar' : 'Activar'}
                   </Boton>
                 )}

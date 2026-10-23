@@ -1,15 +1,8 @@
 import { ruta } from '@/comun/guardia';
-import { leerCuerpo } from '@/comun/http';
-import { rolDto } from '@/usuarios/dto';
 import { SOLO_ADMIN } from '@/usuarios/rol.entity';
-import { crearRol, listarRoles } from '@/usuarios/usuarios.service';
+import { listarRoles } from '@/usuarios/usuarios.service';
 
 export const runtime = 'nodejs';
 
+// Los roles son fijos: no se crean ni se borran (ver editarRol).
 export const GET = ruta(SOLO_ADMIN, async () => listarRoles());
-
-export const POST = ruta(
-  SOLO_ADMIN,
-  async ({ req }) => crearRol(await leerCuerpo(req, rolDto)),
-  201,
-);
