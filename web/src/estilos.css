@@ -1,0 +1,113 @@
+@import 'tailwindcss';
+
+/* Tokens de DESIGN.md (Factory), copiados tal cual. No agregue colores. */
+@theme {
+  /* Colors */
+  --color-obsidian-canvas: #101010;
+  --color-carbon-lift: #1d1a18;
+  --color-ash-stroke: #3d3a39;
+  --color-graphite-mid: #4d4947;
+  --color-warm-granite: #8a8380;
+  --color-pale-stone: #b8b3b0;
+  --color-bone: #eeeeee;
+  --color-chalk: #fafafa;
+  --color-signal-orange: #ee6018;
+  --color-metric-green: #a0ca92;
+
+  /* Typography */
+  --font-geist: 'Geist', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-geist-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Typography — Scale */
+  --text-caption: 12px;
+  --leading-caption: 1;
+  --tracking-caption: -0.24px;
+  --text-body-sm: 14px;
+  --leading-body-sm: 1.43;
+  --text-body: 16px;
+  --leading-body: 1.5;
+  --text-heading: 36px;
+  --leading-heading: 1.1;
+  --tracking-heading: -1.12px;
+  --text-heading-lg: 44px;
+  --leading-heading-lg: 1.12;
+  --tracking-heading-lg: -1.1px;
+  --text-display: 72px;
+  --leading-display: 1;
+  --tracking-display: -2.88px;
+
+  /* Spacing */
+  --spacing-8: 8px;
+  --spacing-16: 16px;
+  --spacing-24: 24px;
+  --spacing-32: 32px;
+  --spacing-40: 40px;
+  --spacing-56: 56px;
+  --spacing-80: 80px;
+  --spacing-96: 96px;
+  --spacing-120: 120px;
+
+  /* Border Radius */
+  --radius-sm: 3px;
+  --radius-lg: 10px;
+  --radius-2xl: 20px;
+}
+
+/* Extensiones del proyecto (no cambian la paleta):
+   - --spacing: 1px hace que toda utilidad numérica sea en píxeles (p-24 = 24px), igual
+     que los nombres de los tokens de DESIGN.md.
+   - Cada tamaño de texto lleva su interlineado y su tracking. */
+@theme {
+  --spacing: 1px;
+  --text-caption--line-height: 1;
+  --text-caption--letter-spacing: -0.24px;
+  --text-body-sm--line-height: 1.43;
+  --text-body--line-height: 1.5;
+  --text-heading--line-height: 1.1;
+  --text-heading--letter-spacing: -1.12px;
+  --text-heading-lg--line-height: 1.12;
+  --text-heading-lg--letter-spacing: -1.1px;
+  --text-display--line-height: 1;
+  --text-display--letter-spacing: -2.88px;
+  --ease-mecanica: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    background: var(--color-obsidian-canvas);
+    color: var(--color-bone);
+    font-family: var(--font-geist);
+    font-weight: 400;
+    font-size: var(--text-body);
+    line-height: var(--leading-body);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 {
+    font-weight: 400;
+  }
+  * {
+    transition-property: color, background-color, border-color, stroke;
+    transition-duration: 0.15s;
+    transition-timing-function: var(--ease-mecanica);
+  }
+  :focus-visible {
+    outline: 1px solid var(--color-bone);
+    outline-offset: 2px;
+  }
+  /* En las tarjetas claras el foco es oscuro. */
+  .superficie-clara :focus-visible {
+    outline-color: var(--color-obsidian-canvas);
+  }
+}
+
+/* La voz de instrumento: Geist Mono 12 px en mayúsculas. */
+@utility mono {
+  font-family: var(--font-geist-mono);
+  font-size: var(--text-caption);
+  line-height: 1.2;
+  letter-spacing: -0.24px;
+  text-transform: uppercase;
+}
