@@ -21,7 +21,7 @@ describe('ruta protegida', () => {
       <RutaProtegida>
         <p>Contenido privado</p>
       </RutaProtegida>,
-      { actor: actorDe('recepcionista') },
+      { actor: actorDe('administrador') },
     );
     expect(await screen.findByText('Contenido privado')).toBeInTheDocument();
   });

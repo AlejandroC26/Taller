@@ -1,59 +1,82 @@
 import { describe, expect, it } from 'vitest';
-import { diagnosticoDto, repuestoDto, tareaDto } from './dto';
-import { costoEstimado } from './reglas';
+import { diagnosticoDto, remitirDto, repuestoDto } from './dto';
+import { exigirListoParaFinalizar, MAXIMO_EVIDENCIA, nombreSeguro, tipoPorFirma, validarEvidencia } from './reglas';
+import type { TareaParaFinalizar } from './reglas';
 
-describe('costo estimado del diagnóstico', () => {
-  it('suma horas × tarifa, servicios y repuestos', () => {
-    const costo = costoEstimado(
-      [
-        { horasEstimadas: 1.5, valorServicio: 20000, repuestos: [{ cantidad: 4, precioUnitario: 38000 }] },
-        { horasEstimadas: 0.5, valorServicio: 0, repuestos: [{ cantidad: 1, precioUnitario: 25000 }] },
-      ],
-      60000,
-    );
-    expect(costo).toEqual({
-      horas: 2,
-      manoObra: 120000,
-      servicios: 20000,
-      repuestos: 177000,
-      total: 317000,
-    });
+const bytes = (...b: number[]) => new Uint8Array(b);
+const PNG = bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+const JPG = bytes(0xff, 0xd8, 0xff, 0xe0, 0, 0);
+const PDF = new TextEncoder().encode('%PDF-1.7 contenido');
+const WEBP = new TextEncoder().encode('RIFF\0\0\0\0WEBPVP8 ');
+
+describe('evidencias', () => {
+  it('reconoce el tipo por la firma del archivo', () => {
+    expect(tipoPorFirma(PNG)).toBe('image/png');
+    expect(tipoPorFirma(JPG)).toBe('image/jpeg');
+    expect(tipoPorFirma(PDF)).toBe('application/pdf');
+    expect(tipoPorFirma(WEBP)).toBe('image/webp');
+    expect(tipoPorFirma(new TextEncoder().encode('<html>'))).toBeNull();
   });
 
-  it('sin tareas el costo es cero', () => {
-    expect(costoEstimado([], 60000).total).toBe(0);
+  it('rechaza vacíos, más de 5 MB y tipos no permitidos', () => {
+    expect(() => validarEvidencia(new Uint8Array())).toThrow(/vacío/);
+    const grande = new Uint8Array(MAXIMO_EVIDENCIA + 1);
+    grande.set(PNG);
+    expect(() => validarEvidencia(grande)).toThrow(/5 MB/);
+    expect(() => validarEvidencia(new TextEncoder().encode('MZ ejecutable'))).toThrow(/Solo se aceptan/);
+    expect(validarEvidencia(JPG)).toBe('image/jpeg');
   });
 
-  it('redondea a centavos', () => {
-    expect(costoEstimado([{ horasEstimadas: 0.33, valorServicio: 0, repuestos: [] }], 33333.33).manoObra).toBe(11000);
+  it('limpia el nombre: sin rutas ni caracteres raros', () => {
+    expect(nombreSeguro('../../etc/passwd')).toBe('passwd');
+    expect(nombreSeguro('C:\\fotos\\freno <1>.jpg')).toBe('freno _1_.jpg');
+  });
+});
+
+describe('listo para finalizar', () => {
+  const t = (cambios: Partial<TareaParaFinalizar> = {}): TareaParaFinalizar => ({
+    id: 1,
+    servicioNombre: 'Pastillas',
+    causa: 'desgaste_normal',
+    garantiaAplica: false,
+    garantiaMotivo: 'Desgaste por uso',
+    fija: false,
+    evidencias: 0,
+    ...cambios,
+  });
+
+  it('necesita al menos un servicio propio (la revisión fija no cuenta)', () => {
+    expect(() => exigirListoParaFinalizar([t({ fija: true })], false, 0)).toThrow(/al menos un servicio/);
+  });
+
+  it('cada causa necesita el motivo del dictamen', () => {
+    expect(() => exigirListoParaFinalizar([t({ garantiaMotivo: ' ' })], false, 0)).toThrow(/motivo del dictamen/);
+  });
+
+  it('si el dictamen aplica, el servicio necesita evidencia', () => {
+    expect(() => exigirListoParaFinalizar([t({ causa: 'defecto_fabrica', garantiaAplica: true })], false, 0)).toThrow(/adjunte/);
+    expect(() => exigirListoParaFinalizar([t({ causa: 'defecto_fabrica', garantiaAplica: true, evidencias: 1 })], false, 1)).not.toThrow();
+  });
+
+  it('si la orden vino por garantía, necesita evidencia aunque el dictamen diga que no aplica', () => {
+    expect(() => exigirListoParaFinalizar([t({ causa: 'manipulacion_cliente' })], true, 0)).toThrow(/vino por garantía/);
+    expect(() => exigirListoParaFinalizar([t({ causa: 'manipulacion_cliente' })], true, 1)).not.toThrow();
   });
 });
 
 describe('validación del diagnóstico', () => {
-  it('un repuesto necesita ítem o descripción', () => {
-    expect(repuestoDto.safeParse({ cantidad: 1 }).success).toBe(false);
-    expect(repuestoDto.safeParse({ itemId: 3, cantidad: 2 }).success).toBe(true);
-    expect(repuestoDto.safeParse({ descripcion: 'Sensor de oxígeno', cantidad: 1, precioUnitario: 180000 }).success).toBe(true);
+  it('normaliza SKU y código de repuesto', () => {
+    const d = diagnosticoDto.parse({ tareas: [{ sku: 'fre-pastillas', repuestos: [{ codigoRepuesto: 'pas-del-cer', cantidad: 1 }] }] });
+    expect(d.tareas[0]).toMatchObject({ sku: 'FRE-PASTILLAS', causa: null, repuestos: [{ codigoRepuesto: 'PAS-DEL-CER' }] });
   });
 
-  it('la cantidad de un repuesto es entera y mínimo 1', () => {
-    expect(repuestoDto.safeParse({ itemId: 3, cantidad: 0 }).success).toBe(false);
-    expect(repuestoDto.safeParse({ itemId: 3, cantidad: 1.5 }).success).toBe(false);
+  it('el repuesto no lleva precio y la cantidad es entera', () => {
+    expect(repuestoDto.safeParse({ codigoRepuesto: 'X1', cantidad: 1.5 }).success).toBe(false);
+    expect(repuestoDto.parse({ codigoRepuesto: 'X1', cantidad: 2, precio: 9 } as never)).not.toHaveProperty('precio');
   });
 
-  it('una tarea sin repuestos queda con lista vacía y valor 0', () => {
-    expect(tareaDto.parse({ descripcion: 'Revisar frenos', horasEstimadas: 1 })).toEqual({
-      descripcion: 'Revisar frenos',
-      horasEstimadas: 1,
-      valorServicio: 0,
-      requierePiezas: false,
-      repuestos: [],
-    });
-  });
-
-  it('rechaza horas negativas y más de 50 pasos', () => {
-    expect(tareaDto.safeParse({ descripcion: 'Paso', horasEstimadas: -1 }).success).toBe(false);
-    const pasos = Array.from({ length: 51 }, () => ({ descripcion: 'Paso', horasEstimadas: 1 }));
-    expect(diagnosticoDto.safeParse({ tareas: pasos }).success).toBe(false);
+  it('remitir exige una nota para el especialista', () => {
+    expect(remitirDto.safeParse({ taller: 'PL-FRENOS', nota: 'x' }).success).toBe(false);
+    expect(remitirDto.safeParse({ taller: 2, nota: 'Ruido en la rueda delantera' }).success).toBe(true);
   });
 });

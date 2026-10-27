@@ -1,43 +1,52 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { NOMBRE_TALLER } from '../config';
-import { crearCliente, crearVehiculo, listarClientes } from '../clientes/clientes.service';
-import { clienteDto, vehiculoDto } from '../clientes/dto';
 import { validar } from '../comun/http';
-import { finalizarDiagnostico, guardarDiagnostico, verDiagnostico } from '../diagnosticos/diagnosticos.service';
-import { diagnosticoDto } from '../diagnosticos/dto';
-import { estadoVehiculo, ingresoDto, registrarIngreso } from '../integraciones/concesionario';
-import { movimientoDto } from '../inventario/dto';
-import { listarItems, registrarMovimiento } from '../inventario/inventario.service';
-import { nuevaOrdenDto } from '../ordenes/dto';
+import { consultarCotizacion, pagoDto, registrarPago, registrarRespuestaCliente, respuestaClienteDto } from '../cotizaciones/cotizaciones.service';
+import { finalizarDiagnostico, guardarDiagnostico, remitirOrden, verDiagnostico } from '../diagnosticos/diagnosticos.service';
+import { diagnosticoDto, remitirDto } from '../diagnosticos/dto';
+import { guardarEvidencia, listarEvidencias } from '../diagnosticos/evidencias.service';
+import { CAUSAS, PAGADORES } from '../garantias/reglas';
+import { registrarResultadoGarantia, resultadoGarantiaDto } from '../garantias/garantias.service';
+import { estadoIntegraciones, reintentar } from '../integraciones/despachador';
+import { unaVez } from '../integraciones/idempotencia';
 import {
-  asignar,
-  cambiarEstado,
-  cancelar,
-  crearOrden,
-  disponibilidad,
+  agendarCita,
+  cancelarCita,
+  citaDto,
+  consultarPrediagnostico,
+  filtroOrdenesDto,
   listarOrdenes,
-  panel,
+  prediagnosticarDto,
+  registrarSalida,
+  tomarOrden,
   unaOrden,
 } from '../ordenes/ordenes.service';
-import { ESTADOS, ETAPAS } from '../ordenes/reglas';
-import { horasDto } from '../reparaciones/dto';
+import { ESTADOS } from '../ordenes/reglas';
+import { horasDto, parteDto } from '../reparaciones/dto';
 import {
   marcarTarea,
   registrarHoras,
-  registrarParte,
+  registrarParteUsada,
   terminarReparacion,
   verReparacion,
 } from '../reparaciones/reparaciones.service';
+import { buscarCodigosRepuesto, listarServicios, registrarServicio, servicioDto } from '../servicios/servicios.service';
+import { ESPECIALIDADES, TIPOS_TALLER } from '../talleres/reglas';
+import { actualizarTaller, disponibilidad, editarTallerDto, listarTalleres, registrarTaller, tallerDto } from '../talleres/talleres.service';
 import type { Actor } from '../usuarios/actor';
-import { PERSONAL, TALLER } from '../usuarios/rol.entity';
+import { contratoMarkdown, describirFlujo, flujoMarkdown } from './flujo';
 
-const resultado = (datos: unknown) => ({
-  content: [{ type: 'text' as const, text: JSON.stringify(datos, null, 2) }],
-});
+// ---------- Respuestas ----------
 
-// Un error de negocio se devuelve como resultado, para que el modelo lo lea y
-// corrija.
+// Todo resultado va como texto JSON (para cualquier cliente) y como structuredContent
+// (para los agentes que lo validan con el outputSchema).
+const resultado = (datos: unknown) => {
+  const objeto = Array.isArray(datos) ? { elementos: datos, total: datos.length } : (datos as Record<string, unknown>);
+  return { content: [{ type: 'text' as const, text: JSON.stringify(objeto, null, 2) }], structuredContent: objeto };
+};
+
+// Un error de negocio vuelve como resultado, para que el agente lo lea y corrija.
 const fallo = (error: unknown) => ({
   isError: true,
   content: [{ type: 'text' as const, text: (error as Error).message ?? String(error) }],
@@ -51,427 +60,803 @@ const seguro = async (accion: () => Promise<unknown>) => {
   }
 };
 
-const LECTURA = { readOnlyHint: true } as const;
+// ---------- Esquemas comunes ----------
+
+const LECTURA = { readOnlyHint: true, openWorldHint: false } as const;
 const ESCRIBE = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
+const DESTRUYE = { readOnlyHint: false, destructiveHint: true, openWorldHint: false } as const;
+
 const codigo = z.string().describe('Código de la orden; por ejemplo: OT-0001');
+const idMensaje = z
+  .string()
+  .max(120)
+  .optional()
+  .describe('Identificador único de esta llamada. Si se repite (un reintento), el taller devuelve lo mismo sin repetir el cambio');
+const sede = z.union([z.number().int(), z.string()]).describe('Sede: id numérico o código, por ejemplo PL-FRENOS');
 
-// Los esquemas de las herramientas son simples (sin transformaciones) para que se
-// puedan describir en JSON Schema; los DTO de la API normalizan y validan dentro.
-const esquemaCliente = z.object({
-  nombre: z.string(),
-  apellido: z.string(),
-  documento: z.string(),
-  telefono: z.string(),
-  correo: z.string().optional(),
-  direccion: z.string().optional(),
+// Toda respuesta sobre una orden trae su estado y la guía para el orquestador.
+const SALIDA_ORDEN = z.looseObject({
+  codigo: z.string(),
+  estado: z.string(),
+  siguiente_paso: z.looseObject({ responsable: z.string(), descripcion: z.string() }),
+  acciones_disponibles: z.array(z.string()),
 });
-const esquemaVehiculo = z.object({
-  placa: z.string().describe('Placa; por ejemplo: ABC123'),
-  marca: z.string(),
-  modelo: z.string(),
-  anio: z.number().int(),
-  color: z.string().optional(),
-  kilometraje: z.number().int().optional(),
-});
+const SALIDA_LISTA = z.looseObject({ elementos: z.array(z.looseObject({})), total: z.number() });
+const SALIDA_OBJETO = z.looseObject({});
 
-// Las herramientas que ve cada rol. Se exporta para probarlo sin levantar el servidor.
-export function herramientasDe(rol: string): string[] {
-  const lista: string[] = [];
-  if (TALLER.includes(rol)) {
-    lista.push('consultar_ordenes', 'consultar_diagnostico', 'consultar_reparacion', 'consultar_inventario');
-  }
-  if (rol === 'mecanico' || rol === 'administrador') {
-    lista.push(
-      'registrar_diagnostico',
-      'finalizar_diagnostico',
-      'registrar_horas',
-      'registrar_parte_usada',
-      'marcar_tarea',
-      'terminar_reparacion',
-    );
-  }
-  if (PERSONAL.includes(rol)) {
-    lista.push(
-      'panel_taller',
-      'consultar_disponibilidad',
-      'asignar_mecanico',
-      'buscar_clientes',
-      'registrar_cliente',
-      'registrar_vehiculo',
-      'crear_orden',
-      'cambiar_estado_orden',
-      'actualizar_inventario',
-      'cancelar_orden',
-    );
-  }
-  if (rol === 'concesionario' || PERSONAL.includes(rol)) {
-    lista.push('registrar_ingreso_vehiculo', 'estado_vehiculo');
-  }
-  return lista;
+// ---------- Permisos ----------
+
+// El mecánico ve solo sus herramientas; el agente (concesionario, facturación,
+// orquestador…) y el administrador ven todas.
+export const HERRAMIENTAS_MECANICO = [
+  'describir_flujo',
+  'mis_ordenes',
+  'estado_orden',
+  'tomar_orden',
+  'consultar_diagnostico',
+  'registrar_diagnostico',
+  'adjuntar_evidencia',
+  'consultar_evidencias',
+  'remitir_orden',
+  'finalizar_diagnostico',
+  'consultar_reparacion',
+  'registrar_horas',
+  'registrar_parte_usada',
+  'marcar_tarea',
+  'terminar_reparacion',
+  'consultar_servicios',
+  'buscar_codigos_repuesto',
+  'listar_talleres',
+];
+
+export function herramientasDe(rol: string, todas: string[]): string[] {
+  if (rol === 'agente' || rol === 'administrador') return todas;
+  if (rol === 'mecanico') return todas.filter((h) => HERRAMIENTAS_MECANICO.includes(h));
+  return [];
 }
 
-// Se crea un servidor por petición y para un usuario concreto: cada rol ve solo sus
-// herramientas.
+// ---------- Servidor ----------
+
+// Se crea un servidor por petición, para el usuario dueño del token.
 export function crearServidorMcp(actor: Actor): McpServer {
-  const permitidas = new Set(herramientasDe(actor.rol));
   const servidor = new McpServer(
-    { name: 'taller', version: '1.0.0' },
+    { name: 'taller-pulgas-locas', version: '2.0.0' },
     {
       instructions:
-        `Herramientas del ${NOMBRE_TALLER}, mecánica general (órdenes de servicio, diagnóstico, reparación e inventario). ` +
-        `Usuario: ${actor.nombre} ${actor.apellido}, rol ${actor.rol}. ` +
-        'Los montos están en pesos colombianos. Antes de cancelar una orden o registrar ' +
-        'partes usadas, confirme con el usuario el código y las cantidades.',
+        `MCP de ${NOMBRE_TALLER} (S.A.S. con varias sedes). Usuario: ${actor.nombre} ${actor.apellido}, rol ${actor.rol}. ` +
+        'Lea el recurso taller://flujo (o llame describir_flujo) para entender los estados. Cada respuesta sobre una ' +
+        'orden trae siguiente_paso (qué falta y quién lo hace) y acciones_disponibles (qué herramientas llamar ahora). ' +
+        'Envíe id_mensaje en las llamadas que cambian algo: si reintenta, no se repite el cambio. Montos en pesos colombianos.',
     },
   );
-  const si = (nombre: string) => permitidas.has(nombre);
 
-  if (si('consultar_ordenes'))
+  // Se registran todas y luego se quitan las que el rol no puede ver.
+  const registradas = new Map<string, { remove: () => void }>();
+  const registrar = <T>(nombre: string, registro: T) => {
+    registradas.set(nombre, registro as unknown as { remove: () => void });
+  };
+
+  // ===== Orquestación =====
+  registrar(
+    'describir_flujo',
     servidor.registerTool(
-      'consultar_ordenes',
-    {
-      title: 'Consultar órdenes de servicio',
-      description:
-        (actor.rol === 'mecanico' ? 'Consulta los carros que tiene asignados. ' : 'Consulta las órdenes del taller. ') +
-        'Con un código devuelve el detalle de esa orden; sin código, la lista (filtrable por estado o por placa).',
-      inputSchema: z.object({
-        codigo: codigo.optional(),
-        estado: z.enum(ESTADOS).optional().describe('Filtra por estado'),
-        buscar: z.string().optional().describe('Placa o nombre del cliente'),
-      }),
-      annotations: LECTURA,
-    },
-    ({ codigo: cod, estado, buscar }) =>
-      seguro(() => (cod ? unaOrden(actor, cod) : listarOrdenes(actor, { estado, buscar }, 30))),
+      'describir_flujo',
+      {
+        title: 'Describir el flujo',
+        description: 'Estados de una orden, a cuáles puede pasar, quién la mueve en cada uno y con qué herramientas; y lo que el taller les envía a los otros agentes.',
+        outputSchema: SALIDA_OBJETO,
+        annotations: LECTURA,
+      },
+      () => seguro(async () => describirFlujo()),
+    ),
   );
 
-  if (si('consultar_diagnostico'))
+  registrar(
+    'estado_orden',
     servidor.registerTool(
-      'consultar_diagnostico',
-    {
-      title: 'Consultar diagnóstico',
-      description: 'Devuelve el paso a paso del diagnóstico de una orden, los repuestos y el costo estimado.',
-      inputSchema: z.object({ codigo }),
-      annotations: LECTURA,
-    },
-    ({ codigo: cod }) => seguro(() => verDiagnostico(actor, cod)),
+      'estado_orden',
+      {
+        title: 'Estado de una orden',
+        description: 'Detalle de una orden: sede, cliente y vehículo, garantía del vehículo, prediagnóstico, historial, siguiente_paso y acciones_disponibles.',
+        inputSchema: z.object({ codigo }),
+        outputSchema: SALIDA_ORDEN,
+        annotations: LECTURA,
+      },
+      ({ codigo: c }) => seguro(() => unaOrden(actor, c)),
+    ),
   );
 
-  if (si('consultar_reparacion'))
+  registrar(
+    'listar_ordenes',
     servidor.registerTool(
-      'consultar_reparacion',
-    {
-      title: 'Consultar reparación y liquidación',
-      description:
-        'Devuelve las horas registradas, las partes usadas, las tareas hechas y la liquidación (estimado contra real).',
-      inputSchema: z.object({ codigo }),
-      annotations: LECTURA,
-    },
-    ({ codigo: cod }) => seguro(() => verReparacion(actor, cod)),
+      'listar_ordenes',
+      {
+        title: 'Listar órdenes',
+        description: 'Órdenes filtradas por estado, sede o id_relacion (las más recientes primero).',
+        inputSchema: z.object({
+          estado: z.enum(ESTADOS).optional(),
+          taller: z.number().int().optional().describe('id de la sede'),
+          id_relacion: z.string().optional(),
+          abiertas: z.boolean().optional().describe('true: solo las que no están entregadas ni canceladas'),
+        }),
+        outputSchema: SALIDA_LISTA,
+        annotations: LECTURA,
+      },
+      ({ estado, taller, id_relacion, abiertas }) =>
+        seguro(() => listarOrdenes(actor, validar(filtroOrdenesDto, { estado, tallerId: taller, idRelacion: id_relacion, abiertas }))),
+    ),
   );
 
-  if (si('consultar_inventario'))
+  // ===== Concesionario =====
+  registrar(
+    'listar_talleres',
     servidor.registerTool(
-      'consultar_inventario',
-    {
-      title: 'Consultar inventario',
-      description: 'Busca ítems por nombre o código con su precio, cantidad y nivel de alerta.',
-      inputSchema: z.object({
-        texto: z.string().optional().describe('Parte del nombre o del código; por ejemplo: filtro'),
-        solo_alertas: z.boolean().optional().describe('true para ver solo los ítems en alerta'),
-      }),
-      annotations: LECTURA,
-    },
-    ({ texto, solo_alertas }) => seguro(() => listarItems({ texto, soloAlertas: solo_alertas })),
+      'listar_talleres',
+      {
+        title: 'Listar sedes',
+        description: 'Sedes de la S.A.S. con su tipo (mantenimiento o especializado), especialidades, ubicación y horario.',
+        inputSchema: z.object({ especialidad: z.enum(ESPECIALIDADES).optional(), ciudad: z.string().optional() }),
+        outputSchema: SALIDA_LISTA,
+        annotations: LECTURA,
+      },
+      ({ especialidad, ciudad }) => seguro(() => listarTalleres({ especialidad, ciudad })),
+    ),
   );
 
-  if (si('registrar_diagnostico'))
+  registrar(
+    'prediagnosticar',
     servidor.registerTool(
-      'registrar_diagnostico',
-    {
-      title: 'Registrar diagnóstico',
-      description:
-        'Guarda el borrador del diagnóstico: reemplaza el paso a paso completo con sus horas, valor del servicio ' +
-        'y repuestos (item_id del inventario, o descripción si no está en inventario).',
-      inputSchema: z.object({
-        codigo,
-        observaciones: z.string().optional(),
-        tareas: z
-          .array(
-            z.object({
-              descripcion: z.string().describe('Qué hacer en este paso'),
-              horas_estimadas: z.number().min(0),
-              valor_servicio: z.number().min(0).optional(),
-              repuestos: z
-                .array(
-                  z.object({
-                    item_id: z.number().int().optional().describe('id según consultar_inventario'),
-                    descripcion: z.string().optional().describe('Pieza que no está en inventario'),
-                    cantidad: z.number().int().min(1),
-                    precio_unitario: z.number().min(0).optional(),
-                  }),
-                )
-                .optional(),
-            }),
-          )
-          .min(1),
-      }),
-      annotations: ESCRIBE,
-    },
-    ({ codigo: cod, observaciones, tareas }) =>
-      seguro(() =>
-        guardarDiagnostico(
-          actor,
-          cod,
-          validar(diagnosticoDto, {
-            observaciones,
-            tareas: tareas.map((t) => ({
-              descripcion: t.descripcion,
-              horasEstimadas: t.horas_estimadas,
-              valorServicio: t.valor_servicio,
-              repuestos: (t.repuestos ?? []).map((r) => ({
-                itemId: r.item_id,
-                descripcion: r.descripcion,
-                cantidad: r.cantidad,
-                precioUnitario: r.precio_unitario,
-              })),
-            })),
-          }),
-        ),
-      ),
+      'prediagnosticar',
+      {
+        title: 'Prediagnóstico (servicio de diagnóstico del taller)',
+        description:
+          'El agente de prediagnóstico lee lo que el cliente le contó al concesionario y responde la especialidad, los servicios probables con su precio, la confianza y la ruta: ' +
+          '"especializada" (directo a la sede especialista) o "revision_general" (primero a mantenimiento). Incluye la sede sugerida y la garantía del vehículo.',
+        inputSchema: z.object({
+          id_relacion: z.string().describe('Id de la relación cliente–vehículo del concesionario; por ejemplo REL-1001'),
+          mensajes_cliente: z.array(z.string()).min(1).describe('Lo que el cliente contó, un mensaje por elemento'),
+        }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: LECTURA,
+      },
+      ({ id_relacion, mensajes_cliente }) =>
+        seguro(() => consultarPrediagnostico(validar(prediagnosticarDto, { idRelacion: id_relacion, mensajesCliente: mensajes_cliente }))),
+    ),
   );
 
-  if (si('finalizar_diagnostico'))
-    servidor.registerTool(
-      'finalizar_diagnostico',
-    {
-      title: 'Finalizar diagnóstico',
-      description: 'Cierra el diagnóstico y deja la orden lista para que el cliente apruebe el costo.',
-      inputSchema: z.object({ codigo }),
-      annotations: ESCRIBE,
-    },
-    ({ codigo: cod }) => seguro(() => finalizarDiagnostico(actor, cod)),
-  );
-
-  if (si('registrar_horas'))
-    servidor.registerTool(
-      'registrar_horas',
-    {
-      title: 'Registrar horas de trabajo',
-      description: 'Registra el tiempo trabajado en la reparación (fechas ISO 8601 con zona horaria).',
-      inputSchema: z.object({
-        codigo,
-        inicio: z.string().describe('Por ejemplo: 2026-10-22T08:00:00-05:00'),
-        fin: z.string().describe('Por ejemplo: 2026-10-22T10:30:00-05:00'),
-        tarea_id: z.number().int().optional().describe('Paso del diagnóstico en que trabajó'),
-        nota: z.string().optional(),
-      }),
-      annotations: ESCRIBE,
-    },
-    ({ codigo: cod, inicio, fin, tarea_id, nota }) =>
-      seguro(() => registrarHoras(actor, cod, validar(horasDto, { inicio, fin, tareaId: tarea_id, nota }))),
-  );
-
-  if (si('registrar_parte_usada'))
-    servidor.registerTool(
-      'registrar_parte_usada',
-    {
-      title: 'Registrar parte usada',
-      description: 'Descuenta una parte del inventario y la suma a la reparación. Confirme cantidad antes.',
-      inputSchema: z.object({ codigo, item_id: z.number().int(), cantidad: z.number().int().min(1) }),
-      annotations: ESCRIBE,
-    },
-    ({ codigo: cod, item_id, cantidad }) => seguro(() => registrarParte(actor, cod, item_id, cantidad)),
-  );
-
-  if (si('marcar_tarea'))
-    servidor.registerTool(
-      'marcar_tarea',
-    {
-      title: 'Marcar paso como hecho',
-      description: 'Marca o desmarca un paso del diagnóstico como completado en la reparación.',
-      inputSchema: z.object({ codigo, tarea_id: z.number().int(), completada: z.boolean() }),
-      annotations: ESCRIBE,
-    },
-    ({ codigo: cod, tarea_id, completada }) => seguro(() => marcarTarea(actor, cod, tarea_id, completada)),
-  );
-
-  if (si('terminar_reparacion'))
-    servidor.registerTool(
-      'terminar_reparacion',
-    {
-      title: 'Terminar reparación',
-      description: 'Cierra la reparación con su liquidación y solicita la factura.',
-      inputSchema: z.object({ codigo }),
-      annotations: ESCRIBE,
-    },
-    ({ codigo: cod }) => seguro(() => terminarReparacion(actor, cod)),
-  );
-
-  if (si('panel_taller'))
-    servidor.registerTool(
-      'panel_taller',
-    {
-      title: 'Panel del taller',
-      description: 'Resumen: órdenes abiertas por etapa, ítems en alerta, facturado del mes y carga de mecánicos.',
-      annotations: LECTURA,
-    },
-    () => seguro(() => panel()),
-  );
-
-  if (si('consultar_disponibilidad'))
+  registrar(
+    'consultar_disponibilidad',
     servidor.registerTool(
       'consultar_disponibilidad',
-    {
-      title: 'Consultar disponibilidad de mecánicos',
-      description: 'Lista los mecánicos con su carga actual (órdenes abiertas) para decidir a quién asignar.',
-      annotations: LECTURA,
-    },
-    () => seguro(() => disponibilidad()),
+      {
+        title: 'Disponibilidad de una sede',
+        description: 'Franjas de una hora libres para agendar en una sede y fecha, con los cupos que quedan.',
+        inputSchema: z.object({ taller: sede, fecha: z.string().describe('AAAA-MM-DD') }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: LECTURA,
+      },
+      ({ taller, fecha }) => seguro(() => disponibilidad(taller, fecha)),
+    ),
   );
 
-  if (si('asignar_mecanico'))
+  registrar(
+    'agendar_cita',
     servidor.registerTool(
-      'asignar_mecanico',
-    {
-      title: 'Asignar mecánico',
-      description: 'Asigna un mecánico a la etapa de diagnóstico o de reparación de una orden.',
-      inputSchema: z.object({
-        codigo,
-        mecanico_id: z.string().describe('id del mecánico, según consultar_disponibilidad'),
-        etapa: z.enum(ETAPAS),
-      }),
-      annotations: ESCRIBE,
-    },
-    ({ codigo: cod, mecanico_id, etapa }) => seguro(() => asignar(actor, cod, mecanico_id, etapa)),
+      'agendar_cita',
+      {
+        title: 'Agendar cita',
+        description:
+          'Agenda el vehículo en una sede. Envíe los mensajes del cliente: el taller calcula el prediagnóstico y, si no indica sede, usa la sugerida. ' +
+          'Marque por_garantia si el cliente reclama garantía. Crea la orden en estado agendada.',
+        inputSchema: z.object({
+          id_relacion: z.string(),
+          fecha_hora: z.string().describe('ISO 8601 con zona, en una franja libre; por ejemplo 2026-10-27T09:00:00-05:00'),
+          taller: sede.optional(),
+          mensajes_cliente: z.array(z.string()).optional(),
+          sintomas: z.string().optional(),
+          kilometraje: z.number().int().optional(),
+          por_garantia: z.boolean().optional(),
+          motivo_reclamo: z.string().optional(),
+          id_mensaje: idMensaje,
+        }),
+        outputSchema: SALIDA_ORDEN,
+        annotations: ESCRIBE,
+      },
+      (e) =>
+        seguro(() =>
+          unaVez(e.id_mensaje, 'agendar_cita', () =>
+            agendarCita(
+              actor,
+              validar(citaDto, {
+                idRelacion: e.id_relacion,
+                fechaHora: e.fecha_hora,
+                taller: e.taller,
+                mensajesCliente: e.mensajes_cliente,
+                sintomas: e.sintomas,
+                kilometraje: e.kilometraje,
+                porGarantia: e.por_garantia,
+                motivoReclamo: e.motivo_reclamo,
+              }),
+            ),
+          ),
+        ),
+    ),
   );
 
-  if (si('buscar_clientes'))
+  registrar(
+    'cancelar_cita',
     servidor.registerTool(
-      'buscar_clientes',
-    {
-      title: 'Buscar clientes',
-      description: 'Busca clientes por nombre, documento o placa, con sus vehículos.',
-      inputSchema: z.object({ texto: z.string().optional() }),
-      annotations: LECTURA,
-    },
-    ({ texto }) => seguro(() => listarClientes(texto)),
+      'cancelar_cita',
+      {
+        title: 'Cancelar orden',
+        description: 'Cancela la cita u orden mientras no haya empezado la reparación. No se puede deshacer.',
+        inputSchema: z.object({ codigo, motivo: z.string().min(5), id_mensaje: idMensaje }),
+        outputSchema: SALIDA_ORDEN,
+        annotations: DESTRUYE,
+      },
+      ({ codigo: c, motivo, id_mensaje }) => seguro(() => unaVez(id_mensaje, 'cancelar_cita', () => cancelarCita(actor, c, motivo))),
+    ),
   );
 
-  if (si('registrar_cliente'))
+  registrar(
+    'consultar_evidencias',
     servidor.registerTool(
-      'registrar_cliente',
-    {
-      title: 'Registrar cliente',
-      description: 'Registra un cliente nuevo del taller.',
-      inputSchema: esquemaCliente,
-      annotations: ESCRIBE,
-    },
-    (datos) => seguro(() => crearCliente(validar(clienteDto, datos))),
+      'consultar_evidencias',
+      {
+        title: 'Evidencias de una orden',
+        description: 'Fotos y PDF que adjuntó el mecánico, con la URL de descarga (GET con el mismo token web del taller).',
+        inputSchema: z.object({ codigo }),
+        outputSchema: SALIDA_LISTA,
+        annotations: LECTURA,
+      },
+      ({ codigo: c }) => seguro(() => listarEvidencias(actor, c)),
+    ),
   );
 
-  if (si('registrar_vehiculo'))
+  registrar(
+    'registrar_resultado_garantia',
     servidor.registerTool(
-      'registrar_vehiculo',
-    {
-      title: 'Registrar vehículo',
-      description: 'Registra un vehículo a nombre de un cliente (cliente_id según buscar_clientes).',
-      inputSchema: esquemaVehiculo.extend({ cliente_id: z.number().int() }),
-      annotations: ESCRIBE,
-    },
-    ({ cliente_id, ...datos }) => seguro(() => crearVehiculo(cliente_id, validar(vehiculoDto, datos))),
+      'registrar_resultado_garantia',
+      {
+        title: 'Resultado de la garantía (concesionario)',
+        description:
+          'Respuesta del concesionario a validar_garantia: por cada servicio (tarea_id) si la garantía es válida y por qué. ' +
+          'La orden pasa a en_cotizacion y se le envía la cotización a facturación con ese resultado.',
+        inputSchema: z.object({
+          codigo,
+          resultados: z.array(z.object({ tarea_id: z.number().int(), valida: z.boolean(), motivo: z.string() })).min(1),
+          id_mensaje: idMensaje,
+        }),
+        outputSchema: SALIDA_ORDEN,
+        annotations: ESCRIBE,
+      },
+      ({ codigo: c, resultados, id_mensaje }) =>
+        seguro(() => {
+          const { resultados: r } = validar(resultadoGarantiaDto, {
+            resultados: resultados.map((x) => ({ tareaId: x.tarea_id, valida: x.valida, motivo: x.motivo })),
+          });
+          return registrarResultadoGarantia(actor, c, r, id_mensaje);
+        }),
+    ),
   );
 
-  if (si('crear_orden'))
+  // ===== Facturación =====
+  registrar(
+    'consultar_cotizacion',
     servidor.registerTool(
-      'crear_orden',
-    {
-      title: 'Crear orden de servicio',
-      description: 'Abre una orden de servicio para un vehículo ya registrado.',
-      inputSchema: z.object({
-        placa: z.string(),
-        motivo: z.string().describe('Lo que reporta el cliente'),
-        kilometraje: z.number().int().optional(),
-      }),
-      annotations: ESCRIBE,
-    },
-    (datos) => seguro(() => crearOrden(actor, validar(nuevaOrdenDto, datos))),
+      'consultar_cotizacion',
+      {
+        title: 'Cotización de una orden',
+        description:
+          'Mano de obra con su precio (SKU) y repuestos a comprar (código universal y cantidad, sin precio), cada línea con su garantía y quién paga, ' +
+          'más el mensaje_garantia para el cliente y la orden de compra ya registrada.',
+        inputSchema: z.object({ codigo }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: LECTURA,
+      },
+      ({ codigo: c }) => seguro(() => consultarCotizacion(actor, c)),
+    ),
   );
 
-  if (si('cambiar_estado_orden'))
+  registrar(
+    'registrar_respuesta_cliente',
     servidor.registerTool(
-      'cambiar_estado_orden',
-    {
-      title: 'Aprobar o entregar una orden',
-      description:
-        'aprobado: el cliente aceptó el costo del diagnóstico. entregado: el carro reparado se le entregó al cliente.',
-      inputSchema: z.object({ codigo, estado: z.enum(['aprobado', 'entregado']), nota: z.string().optional() }),
-      annotations: ESCRIBE,
-    },
-    ({ codigo: cod, estado, nota }) => seguro(() => cambiarEstado(actor, cod, estado, nota)),
+      'registrar_respuesta_cliente',
+      {
+        title: 'Respuesta del cliente a la cotización (facturación)',
+        description:
+          'El cliente aceptó o rechazó por Telegram. Si aceptó, envíe la orden de compra que armó con las tiendas (repuesto, tienda, precio): la orden pasa a aprobada. ' +
+          'Si rechazó, pasa a rechazada y el vehículo sale sin reparar.',
+        inputSchema: z.object({
+          codigo,
+          aceptada: z.boolean(),
+          motivo: z.string().optional(),
+          referencia: z.string().optional().describe('Referencia de la cotización en facturación'),
+          orden_compra: z
+            .array(
+              z.object({
+                codigo_repuesto: z.string(),
+                descripcion: z.string().optional(),
+                cantidad: z.number().int(),
+                tienda: z.string(),
+                precio_unitario: z.number(),
+                pagador: z.enum(PAGADORES).optional(),
+              }),
+            )
+            .optional(),
+          id_mensaje: idMensaje,
+        }),
+        outputSchema: SALIDA_ORDEN,
+        annotations: ESCRIBE,
+      },
+      (e) =>
+        seguro(() =>
+          registrarRespuestaCliente(
+            actor,
+            e.codigo,
+            validar(respuestaClienteDto, {
+              aceptada: e.aceptada,
+              motivo: e.motivo,
+              referencia: e.referencia,
+              ordenCompra: (e.orden_compra ?? []).map((l) => ({
+                codigoRepuesto: l.codigo_repuesto,
+                descripcion: l.descripcion,
+                cantidad: l.cantidad,
+                tienda: l.tienda,
+                precioUnitario: l.precio_unitario,
+                pagador: l.pagador,
+              })),
+            }),
+            e.id_mensaje,
+          ),
+        ),
+    ),
   );
 
-  if (si('actualizar_inventario'))
+  registrar(
+    'registrar_pago',
     servidor.registerTool(
-      'actualizar_inventario',
-    {
-      title: 'Actualizar inventario',
-      description: 'Registra una entrada de mercancía, una salida manual o un ajuste por conteo físico.',
-      inputSchema: z.object({
-        item_id: z.number().int(),
-        tipo: z.enum(['entrada', 'salida', 'ajuste']),
-        cantidad: z.number().int().describe('En un ajuste, el conteo físico'),
-        nota: z.string().optional(),
-      }),
-      annotations: ESCRIBE,
-    },
-    ({ item_id, ...datos }) => seguro(() => registrarMovimiento(item_id, validar(movimientoDto, datos), actor)),
+      'registrar_pago',
+      {
+        title: 'Pago confirmado (facturación)',
+        description: 'El cliente pagó el PSE: la orden pasa a facturada y el vehículo puede salir.',
+        inputSchema: z.object({ codigo, referencia_pse: z.string(), valor: z.number(), id_mensaje: idMensaje }),
+        outputSchema: SALIDA_ORDEN,
+        annotations: ESCRIBE,
+      },
+      ({ codigo: c, referencia_pse, valor, id_mensaje }) =>
+        seguro(() => registrarPago(actor, c, validar(pagoDto, { referenciaPse: referencia_pse, valor }), id_mensaje)),
+    ),
   );
 
-  if (si('cancelar_orden'))
+  // ===== Mecánico =====
+  registrar(
+    'mis_ordenes',
     servidor.registerTool(
-      'cancelar_orden',
-    {
-      title: 'Cancelar orden',
-      description:
-        'Cancela el diagnóstico o la reparación de una orden. No se puede deshacer: úsela solo si el usuario ' +
-        'lo pidió de forma explícita y confirmó el código y el motivo.',
-      inputSchema: z.object({ codigo, motivo: z.string().min(5) }),
-      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-    },
-    ({ codigo: cod, motivo }) => seguro(() => cancelar(actor, cod, motivo)),
+      'mis_ordenes',
+      {
+        title: 'Mis órdenes',
+        description: 'Para el mecánico: "mias" (asignadas) o "cola" (de su sede esperando mecánico). Para un agente: las abiertas.',
+        inputSchema: z.object({ vista: z.enum(['mias', 'cola']).optional() }),
+        outputSchema: SALIDA_LISTA,
+        annotations: LECTURA,
+      },
+      ({ vista }) => seguro(() => listarOrdenes(actor, actor.rol === 'mecanico' ? { vista: vista ?? 'mias' } : { abiertas: true })),
+    ),
   );
 
-  if (si('registrar_ingreso_vehiculo'))
+  registrar(
+    'tomar_orden',
     servidor.registerTool(
-      'registrar_ingreso_vehiculo',
-    {
-      title: 'Registrar ingreso desde el concesionario',
-      description:
-        'El concesionario envía un carro al taller: registra o reutiliza cliente y vehículo y abre la orden.',
-      inputSchema: z.object({
-        referencia_externa: z.string().describe('Identificador del vehículo en el concesionario'),
-        cliente: esquemaCliente,
-        vehiculo: esquemaVehiculo,
-        motivo: z.string(),
-        kilometraje: z.number().int().optional(),
-      }),
-      annotations: ESCRIBE,
-    },
-    (datos) => seguro(() => registrarIngreso(actor, validar(ingresoDto, datos))),
+      'tomar_orden',
+      {
+        title: 'Tomar una orden',
+        description:
+          'Un mecánico de la sede toma la orden: si está agendada o remitida, para diagnosticarla; si está aprobada, para repararla. Un agente debe indicar mecanico_id.',
+        inputSchema: z.object({ codigo, mecanico_id: z.string().optional(), id_mensaje: idMensaje }),
+        outputSchema: SALIDA_ORDEN,
+        annotations: ESCRIBE,
+      },
+      ({ codigo: c, mecanico_id, id_mensaje }) => seguro(() => unaVez(id_mensaje, 'tomar_orden', () => tomarOrden(actor, c, mecanico_id))),
+    ),
   );
 
-  if (si('estado_vehiculo'))
+  registrar(
+    'consultar_diagnostico',
     servidor.registerTool(
-      'estado_vehiculo',
-    {
-      title: 'Estado de un vehículo del concesionario',
-      description: 'Devuelve las órdenes y la línea de tiempo de un carro enviado por el concesionario.',
-      inputSchema: z.object({ referencia_externa: z.string() }),
-      annotations: LECTURA,
-    },
-    ({ referencia_externa }) => seguro(() => estadoVehiculo(referencia_externa)),
+      'consultar_diagnostico',
+      {
+        title: 'Consultar diagnóstico',
+        description: 'Servicios (SKU y precio), causa, dictamen de garantía del mecánico, respuesta del concesionario, repuestos a comprar y evidencias.',
+        inputSchema: z.object({ codigo }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: LECTURA,
+      },
+      ({ codigo: c }) => seguro(() => verDiagnostico(actor, c)),
+    ),
   );
+
+  registrar(
+    'registrar_diagnostico',
+    servidor.registerTool(
+      'registrar_diagnostico',
+      {
+        title: 'Registrar diagnóstico (borrador)',
+        description:
+          'Guarda el borrador: cada servicio es un SKU del catálogo, con la causa de la falla, el dictamen de garantía del mecánico (aplica o no y por qué) ' +
+          'y los repuestos a comprar (código universal y cantidad). Con id se actualiza un servicio; sin id se crea; los que no se envíen se borran.',
+        inputSchema: z.object({
+          codigo,
+          observaciones: z.string().optional(),
+          servicios: z.array(
+            z.object({
+              id: z.number().int().optional(),
+              sku: z.string().describe('SKU según consultar_servicios'),
+              descripcion: z.string().optional(),
+              causa: z.enum(CAUSAS).nullable().optional(),
+              garantia_aplica: z.boolean().optional().describe('Dictamen del mecánico; si se omite, el sugerido por la causa'),
+              garantia_motivo: z.string().optional(),
+              repuestos: z
+                .array(z.object({ codigo_repuesto: z.string(), descripcion: z.string().optional(), cantidad: z.number().int() }))
+                .optional(),
+            }),
+          ),
+        }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: ESCRIBE,
+      },
+      (e) =>
+        seguro(() =>
+          guardarDiagnostico(
+            actor,
+            e.codigo,
+            validar(diagnosticoDto, {
+              observaciones: e.observaciones,
+              tareas: e.servicios.map((s) => ({
+                id: s.id,
+                sku: s.sku,
+                descripcion: s.descripcion,
+                causa: s.causa ?? null,
+                garantiaAplica: s.garantia_aplica,
+                garantiaMotivo: s.garantia_motivo,
+                repuestos: (s.repuestos ?? []).map((r) => ({ codigoRepuesto: r.codigo_repuesto, descripcion: r.descripcion, cantidad: r.cantidad })),
+              })),
+            }),
+          ),
+        ),
+    ),
+  );
+
+  registrar(
+    'adjuntar_evidencia',
+    servidor.registerTool(
+      'adjuntar_evidencia',
+      {
+        title: 'Adjuntar evidencia',
+        description: 'Foto (JPG, PNG, WEBP) o PDF en base64, máximo 5 MB, de la orden o de un servicio (tarea_id). Respalda el dictamen de garantía.',
+        inputSchema: z.object({ codigo, nombre: z.string(), contenido_base64: z.string(), tarea_id: z.number().int().optional() }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: ESCRIBE,
+      },
+      ({ codigo: c, nombre, contenido_base64, tarea_id }) =>
+        seguro(() => guardarEvidencia(actor, c, { nombre, datos: new Uint8Array(Buffer.from(contenido_base64, 'base64')), tareaId: tarea_id })),
+    ),
+  );
+
+  registrar(
+    'remitir_orden',
+    servidor.registerTool(
+      'remitir_orden',
+      {
+        title: 'Remitir a sede especializada',
+        description: 'Después de la revisión general, pasa la orden a una sede especializada. La revisión general queda cobrada como servicio fijo.',
+        inputSchema: z.object({ codigo, taller: sede, nota: z.string().min(5), id_mensaje: idMensaje }),
+        outputSchema: SALIDA_ORDEN,
+        annotations: ESCRIBE,
+      },
+      ({ codigo: c, taller, nota, id_mensaje }) =>
+        seguro(() => {
+          const d = validar(remitirDto, { taller, nota });
+          return unaVez(id_mensaje, 'remitir_orden', () => remitirOrden(actor, c, d.taller, d.nota));
+        }),
+    ),
+  );
+
+  registrar(
+    'finalizar_diagnostico',
+    servidor.registerTool(
+      'finalizar_diagnostico',
+      {
+        title: 'Finalizar diagnóstico',
+        description:
+          'Cierra el diagnóstico y lo envía al concesionario para validar la garantía (toda orden se consulta). Exige el motivo de cada dictamen y evidencias si el dictamen dice que aplica o la orden vino por garantía.',
+        inputSchema: z.object({ codigo, id_mensaje: idMensaje }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: ESCRIBE,
+      },
+      ({ codigo: c, id_mensaje }) => seguro(() => unaVez(id_mensaje, 'finalizar_diagnostico', () => finalizarDiagnostico(actor, c))),
+    ),
+  );
+
+  registrar(
+    'consultar_reparacion',
+    servidor.registerTool(
+      'consultar_reparacion',
+      {
+        title: 'Consultar reparación',
+        description: 'Servicios hechos, horas (control), orden de compra de facturación, partes usadas y mano de obra realizada.',
+        inputSchema: z.object({ codigo }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: LECTURA,
+      },
+      ({ codigo: c }) => seguro(() => verReparacion(actor, c)),
+    ),
+  );
+
+  registrar(
+    'registrar_horas',
+    servidor.registerTool(
+      'registrar_horas',
+      {
+        title: 'Registrar horas',
+        description: 'Tiempo trabajado en la reparación (control de productividad; la mano de obra se cobra por SKU).',
+        inputSchema: z.object({
+          codigo,
+          inicio: z.string().describe('ISO 8601 con zona'),
+          fin: z.string().describe('ISO 8601 con zona'),
+          tarea_id: z.number().int().optional(),
+          nota: z.string().optional(),
+          mecanico_id: z.string().optional(),
+        }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: ESCRIBE,
+      },
+      (e) =>
+        seguro(() =>
+          registrarHoras(actor, e.codigo, validar(horasDto, { inicio: e.inicio, fin: e.fin, tareaId: e.tarea_id, nota: e.nota, mecanicoId: e.mecanico_id })),
+        ),
+    ),
+  );
+
+  registrar(
+    'registrar_parte_usada',
+    servidor.registerTool(
+      'registrar_parte_usada',
+      {
+        title: 'Registrar parte usada',
+        description: 'Deja constancia de un repuesto usado y gastado (código universal y cantidad); puede enlazarse a una línea de la orden de compra.',
+        inputSchema: z.object({
+          codigo,
+          codigo_repuesto: z.string(),
+          cantidad: z.number().int(),
+          descripcion: z.string().optional(),
+          compra_id: z.number().int().optional(),
+          nota: z.string().optional(),
+        }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: ESCRIBE,
+      },
+      (e) =>
+        seguro(() =>
+          registrarParteUsada(
+            actor,
+            e.codigo,
+            validar(parteDto, { codigoRepuesto: e.codigo_repuesto, cantidad: e.cantidad, descripcion: e.descripcion, compraId: e.compra_id, nota: e.nota }),
+          ),
+        ),
+    ),
+  );
+
+  registrar(
+    'marcar_tarea',
+    servidor.registerTool(
+      'marcar_tarea',
+      {
+        title: 'Marcar servicio hecho',
+        description: 'Marca o desmarca un servicio del diagnóstico como realizado.',
+        inputSchema: z.object({ codigo, tarea_id: z.number().int(), completada: z.boolean() }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: ESCRIBE,
+      },
+      ({ codigo: c, tarea_id, completada }) => seguro(() => marcarTarea(actor, c, tarea_id, completada)),
+    ),
+  );
+
+  registrar(
+    'terminar_reparacion',
+    servidor.registerTool(
+      'terminar_reparacion',
+      {
+        title: 'Terminar reparación',
+        description: 'Cierra la reparación: queda pendiente de facturación y se le envía a facturación lo hecho y lo usado para que cobre con PSE.',
+        inputSchema: z.object({ codigo, id_mensaje: idMensaje }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: ESCRIBE,
+      },
+      ({ codigo: c, id_mensaje }) => seguro(() => unaVez(id_mensaje, 'terminar_reparacion', () => terminarReparacion(actor, c))),
+    ),
+  );
+
+  registrar(
+    'consultar_servicios',
+    servidor.registerTool(
+      'consultar_servicios',
+      {
+        title: 'Catálogo de servicios',
+        description: 'SKU de la S.A.S. con su precio fijo de mano de obra y horas estándar.',
+        inputSchema: z.object({ especialidad: z.enum(ESPECIALIDADES).optional() }),
+        outputSchema: SALIDA_LISTA,
+        annotations: LECTURA,
+      },
+      ({ especialidad }) => seguro(() => listarServicios(especialidad)),
+    ),
+  );
+
+  registrar(
+    'buscar_codigos_repuesto',
+    servidor.registerTool(
+      'buscar_codigos_repuesto',
+      {
+        title: 'Buscar códigos de repuesto',
+        description: 'Códigos universales de repuestos (iguales en todas las tiendas). Sin precio: el precio lo consigue facturación.',
+        inputSchema: z.object({ texto: z.string().optional() }),
+        outputSchema: SALIDA_LISTA,
+        annotations: LECTURA,
+      },
+      ({ texto }) => seguro(() => buscarCodigosRepuesto(texto)),
+    ),
+  );
+
+  // ===== Administración =====
+  registrar(
+    'registrar_taller',
+    servidor.registerTool(
+      'registrar_taller',
+      {
+        title: 'Registrar sede',
+        description: 'Crea una sede de la S.A.S. con su tipo, especialidades, ubicación y horario.',
+        inputSchema: z.object({
+          codigo: z.string(),
+          nombre: z.string(),
+          tipo: z.enum(TIPOS_TALLER),
+          especialidades: z.array(z.enum(ESPECIALIDADES)),
+          ciudad: z.string(),
+          direccion: z.string(),
+          latitud: z.number().optional(),
+          longitud: z.number().optional(),
+          telefono: z.string().optional(),
+          horario: z.object({ dias: z.array(z.number().int()), apertura: z.string(), cierre: z.string() }),
+        }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: ESCRIBE,
+      },
+      (datos) => seguro(() => registrarTaller(validar(tallerDto, datos))),
+    ),
+  );
+
+  registrar(
+    'actualizar_taller',
+    servidor.registerTool(
+      'actualizar_taller',
+      {
+        title: 'Actualizar sede',
+        description: 'Cambia datos de una sede (nombre, especialidades, ubicación, horario, activa).',
+        inputSchema: z.object({
+          taller: sede,
+          nombre: z.string().optional(),
+          tipo: z.enum(TIPOS_TALLER).optional(),
+          especialidades: z.array(z.enum(ESPECIALIDADES)).optional(),
+          ciudad: z.string().optional(),
+          direccion: z.string().optional(),
+          telefono: z.string().optional(),
+          horario: z.object({ dias: z.array(z.number().int()), apertura: z.string(), cierre: z.string() }).optional(),
+          activo: z.boolean().optional(),
+        }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: ESCRIBE,
+      },
+      ({ taller, ...datos }) => seguro(() => actualizarTaller(taller, validar(editarTallerDto, datos))),
+    ),
+  );
+
+  registrar(
+    'registrar_servicio',
+    servidor.registerTool(
+      'registrar_servicio',
+      {
+        title: 'Registrar servicio (SKU)',
+        description: 'Crea o actualiza un SKU del catálogo con su precio de mano de obra y palabras clave para el prediagnóstico.',
+        inputSchema: z.object({
+          sku: z.string(),
+          nombre: z.string(),
+          especialidad: z.enum(ESPECIALIDADES),
+          precio_mano_obra: z.number(),
+          horas_estandar: z.number(),
+          palabras_clave: z.array(z.string()).optional(),
+          descripcion: z.string().optional(),
+          activo: z.boolean().optional(),
+        }),
+        outputSchema: SALIDA_OBJETO,
+        annotations: ESCRIBE,
+      },
+      (e) =>
+        seguro(() =>
+          registrarServicio(
+            validar(servicioDto, {
+              sku: e.sku,
+              nombre: e.nombre,
+              especialidad: e.especialidad,
+              precioManoObra: e.precio_mano_obra,
+              horasEstandar: e.horas_estandar,
+              palabrasClave: e.palabras_clave,
+              descripcion: e.descripcion,
+              activo: e.activo,
+            }),
+          ),
+        ),
+    ),
+  );
+
+  registrar(
+    'registrar_salida',
+    servidor.registerTool(
+      'registrar_salida',
+      {
+        title: 'Registrar salida del vehículo',
+        description: 'El vehículo sale del taller: pagado (facturada) o sin reparar (rechazada).',
+        inputSchema: z.object({ codigo, nota: z.string().optional(), id_mensaje: idMensaje }),
+        outputSchema: SALIDA_ORDEN,
+        annotations: ESCRIBE,
+      },
+      ({ codigo: c, nota, id_mensaje }) => seguro(() => unaVez(id_mensaje, 'registrar_salida', () => registrarSalida(actor, c, nota))),
+    ),
+  );
+
+  registrar(
+    'consultar_bandeja',
+    servidor.registerTool(
+      'consultar_bandeja',
+      {
+        title: 'Bandeja de salida',
+        description: 'Mensajes que el taller les envía a los otros agentes (concesionario, facturación) y su estado de envío.',
+        outputSchema: SALIDA_OBJETO,
+        annotations: LECTURA,
+      },
+      () => seguro(() => estadoIntegraciones()),
+    ),
+  );
+
+  registrar(
+    'reintentar_envios',
+    servidor.registerTool(
+      'reintentar_envios',
+      {
+        title: 'Reintentar envíos',
+        description: 'Vuelve a enviar los mensajes fallidos o sin destino configurado.',
+        outputSchema: SALIDA_OBJETO,
+        annotations: ESCRIBE,
+      },
+      () => seguro(() => reintentar()),
+    ),
+  );
+
+  // ===== Recursos: para que un agente entienda el sistema sin leer el código =====
+  servidor.registerResource('flujo', 'taller://flujo', { title: 'Flujo de una orden', mimeType: 'text/markdown' }, async (uri) => ({
+    contents: [{ uri: uri.href, mimeType: 'text/markdown', text: flujoMarkdown() }],
+  }));
+  servidor.registerResource('contrato', 'taller://contrato', { title: 'Contrato con los otros agentes', mimeType: 'text/markdown' }, async (uri) => ({
+    contents: [{ uri: uri.href, mimeType: 'text/markdown', text: contratoMarkdown() }],
+  }));
+  servidor.registerResource('talleres', 'taller://talleres', { title: 'Sedes', mimeType: 'application/json' }, async (uri) => ({
+    contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(await listarTalleres(), null, 2) }],
+  }));
+  servidor.registerResource('servicios', 'taller://servicios', { title: 'Catálogo de servicios', mimeType: 'application/json' }, async (uri) => ({
+    contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(await listarServicios(), null, 2) }],
+  }));
+
+  // Se quitan las herramientas que el rol no puede ver.
+  const permitidas = new Set(herramientasDe(actor.rol, [...registradas.keys()]));
+  for (const [nombre, registro] of registradas) if (!permitidas.has(nombre)) registro.remove();
 
   return servidor;
 }

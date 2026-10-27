@@ -2,17 +2,14 @@ import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 // Los roles son datos (nombre y descripción), pero los permisos del código se revisan
 // por el nombre de estos roles del sistema, que no se pueden borrar.
-export const ROLES_SISTEMA = [
-  'administrador',
-  'recepcionista',
-  'mecanico',
-  'concesionario',
-] as const;
+//   agente: rol técnico de los agentes externos y orquestadores (concesionario,
+//   facturación…). Ve todas las herramientas del MCP.
+export const ROLES_SISTEMA = ['administrador', 'mecanico', 'agente'] as const;
 export type RolSistema = (typeof ROLES_SISTEMA)[number];
 
 // Grupos que usan las rutas y el MCP.
-export const PERSONAL: readonly string[] = ['administrador', 'recepcionista'];
-export const TALLER: readonly string[] = ['administrador', 'recepcionista', 'mecanico'];
+export const GESTION: readonly string[] = ['administrador', 'agente'];
+export const TALLER: readonly string[] = ['administrador', 'agente', 'mecanico'];
 export const SOLO_ADMIN: readonly string[] = ['administrador'];
 
 @Entity('roles')

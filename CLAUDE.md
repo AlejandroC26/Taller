@@ -1,14 +1,21 @@
-# Taller Pulgas Locas — guía para Claude
+# Taller Pulgas Locas S.A.S. — guía para Claude
 
-Sistema de gestión del **Taller Pulgas Locas** (mecánica general). Gira alrededor de la **orden de servicio**:
+**Pulgas Locas S.A.S.** es un taller con varias **sedes**:
+- Una de **mantenimiento**, que hace la revisión general.
+- **Especializadas**: frenos y suspensión; motor, eléctrico y transmisión.
 
-1. Recepción registra el carro.
-2. Un mecánico lo diagnostica, paso a paso, con repuestos y costo.
-3. El cliente aprueba.
-4. Uno o varios mecánicos lo reparan, registrando horas y partes.
-5. Se liquida y se entrega.
+Es una pieza de un ecosistema de **agentes** que se hablan por MCP:
+- El **concesionario** es dueño de la relación cliente–vehículo (`id_relacion`), de la API del VIN y de la garantía. Agenda las citas y valida la garantía.
+- **Facturación** cotiza los repuestos con las tiendas, le escribe al cliente por Telegram y cobra con PSE.
+- Las **tiendas** venden las partes. El taller **no tiene inventario**: solo dice qué parte hace falta (código universal y cantidad) y registra lo que usó.
 
-Hay tres roles humanos, **administrador**, **recepcionista** y **mecánico**, y uno técnico, **concesionario**, para el sistema que envía carros. La API también es un **servidor MCP** y está preparada para hablar con los MCP de otros proyectos: partes de vehículos, facturación y concesionario.
+Lo central es el **MCP**. La web es solo la **parte manual del mecánico**:
+- Tomar la orden.
+- Diagnosticar con causa, dictamen de garantía y evidencias.
+- Decir qué partes comprar.
+- Reparar.
+
+El administrador además gestiona usuarios.
 
 Sigue las convenciones de `../espiga-pro`:
 - Todo en español.
@@ -20,6 +27,9 @@ Sigue las convenciones de `../espiga-pro`:
 - MCP de un servidor por petición.
 - La carpeta `pruebas/` con CLIs `.mjs`.
 
+El contrato con los otros agentes, con ejemplos JSON reales, está en
+[`docs/integracion/`](docs/integracion/README.md).
+
 ## Stack y puertos
 
 | Parte | Tecnología | Puerto |
@@ -27,10 +37,11 @@ Sigue las convenciones de `../espiga-pro`:
 | `api/` | Next.js 16 (App Router, solo rutas API) + TypeORM 1 + PostgreSQL 18 + zod 4 + jose | 3001 |
 | `web/` | React 19 + Vite 8 + Tailwind CSS 4 + React Router 8 | 5173 (reenvía `/api` y `/mcp` a 3001) |
 | MCP | `@modelcontextprotocol/server` 2 (Streamable HTTP en `/mcp`) | 3001 |
+| Prediagnóstico | Modelo local compatible con OpenAI (`LOCAL_URL`, Ollama), con reglas de respaldo | — |
 | Pruebas | Vitest 5 en los dos proyectos; Testing Library + jsdom en `web` | — |
 
-- **Variables:** viven en `SENA-IA/.env` (compartido con los otros proyectos; ver `SENA-IA/.env.ejemplo`, sección Taller).
-- **Valores de desarrollo:** se pueden poner en `api/.env.local`, que no se sube al repositorio.
+- **Variables:** viven en `SENA-IA/.env`, compartido con los otros proyectos (ver la sección Taller de `SENA-IA/.env.ejemplo`).
+- **Valores de desarrollo:** se pueden poner en `api/.env.local`, que no se sube al repositorio y tiene prioridad.
 - **PostgreSQL:** es el contenedor `postgres` de `SENA-IA/docker-compose.yml`, con la base `taller`.
 
 ## Comandos
@@ -44,11 +55,12 @@ docker compose exec postgres createdb -U <DB_USUARIO> taller
 # API (desde taller/api)
 npm install
 npm run migracion:correr      # aplica las migraciones
-npm run semilla               # roles, categorías, ítems de ejemplo y el administrador
+npm run semilla               # roles, sedes, catálogo de SKU, códigos de repuesto y el administrador
 npm run dev                   # http://localhost:3001
 npm run pruebas               # pruebas unitarias (sin base de datos)
 npm run tipos                 # tsc --noEmit
-npm run flujo                 # prueba de punta a punta contra la API en marcha
+npm run simular -- todos      # los 11 casos por MCP, como un orquestador (npm run simular -- casos los lista)
+npm run flujo                 # el lado manual por REST, con los permisos
 npm run mcp                   # lista las herramientas MCP (después de node pruebas/entrar.mjs <usuario> <clave>)
 npm run migracion:generar -- src/base-datos/migraciones/<Nombre>   # después de cambiar una entidad
 
@@ -63,94 +75,150 @@ npm run build                 # tsc + vite build
 
 ```
 api/
-  app/api/**/route.ts     Rutas delgadas: validan con zod (dto.ts) y llaman al service.
+  app/api/**/route.ts     Rutas delgadas: validan con zod (dto.ts) y llaman al service. Solo las que usa la
+                          web: auth, usuarios, talleres, servicios, codigos-repuesto, ordenes (tomar, remitir,
+                          evidencias, diagnostico, reparacion), evidencias/:id.
   app/mcp/route.ts        Puerta MCP: exige el token de audiencia 'mcp'.
-  src/config.ts           RAIZ, requerida(), TARIFA_HORA. Carga SENA-IA/.env.
-  src/comun/              errores.ts (ErrorHttp), http.ts (validar, leerCuerpo, entero),
+  prompts/                prediagnostico.txt (instrucciones del agente de prediagnóstico)
+  src/config.ts           RAIZ, requerida(), NOMBRE_TALLER. Carga api/.env.local y SENA-IA/.env.
+  src/comun/              errores.ts (ErrorHttp), http.ts (validar, leerCuerpo, leerCuerpoOpcional, entero),
                           guardia.ts (ruta(roles, fn), publica(fn)), limite.ts, columnas.ts, pruebas.ts
   src/base-datos/         entidades.ts (lista a mano), opciones.ts, conexion.ts (bd()),
                           fuente.ts (CLI de migraciones), semilla.ts, migraciones/
-  src/usuarios/           Rol y Usuario, claves (scrypt), tokens (jose), actor, service, dto
-  src/clientes/           Cliente y Vehiculo
-  src/inventario/         Categoria, Item, Movimiento; reglas.ts (saldo, alerta)
-  src/ordenes/            Orden, Asignacion; reglas.ts (estados, permisos, carga); service (panel, disponibilidad)
-  src/diagnosticos/       Diagnostico, Tarea (paso), Repuesto; reglas.ts (costo estimado)
-  src/reparaciones/       Reparacion, RegistroHoras, ParteUsada; reglas.ts (horas, liquidación, factura)
-  src/integraciones/      Bandeja de salida (evento.entity, bandeja, despachador), conector MCP, contrato,
-                          concesionario (ingreso de carros), partes (búsqueda en línea)
-  src/mcp/herramientas.ts Servidor MCP por petición; herramientasDe(rol)
-  pruebas/                flujo.mjs (punta a punta), entrar.mjs, probar-mcp.mjs, comun.mjs
+  src/usuarios/           Rol y Usuario (con sede), claves (scrypt), tokens (jose), actor, service, dto
+  src/talleres/           Taller (sede); reglas.ts (franjas libres, zona horaria -05:00)
+  src/servicios/          Servicio (SKU con precio fijo) y CodigoRepuesto (código universal, sin precio)
+  src/relaciones/         RelacionVehiculo: copia local de lo que el concesionario dice del id_relacion
+  src/prediagnostico/     agente.ts (modelo local → JSON) y reglas.ts (palabras clave, ruta, sede)
+  src/ordenes/            Orden, Asignacion; reglas.ts (estados, PASOS, quién ve qué); service (citas, cola,
+                          tomar, salida, siguiente_paso)
+  src/diagnosticos/       Diagnostico, Tarea (servicio con causa y garantía), Repuesto (código + cantidad),
+                          Evidencia; reglas.ts (archivos, listo para finalizar); service (guardar, remitir,
+                          finalizar), evidencias.service (almacen/evidencias/)
+  src/garantias/          reglas.ts (causas, dictamen sugerido, pagador, cobertura, regla del concesionario
+                          simulado); service (solicitar validación, aplicar resultado)
+  src/cotizaciones/       Compra (orden de compra de facturación); reglas.ts (armar la cotización y el
+                          mensaje de garantía); service (cotización, respuesta del cliente, pago)
+  src/reparaciones/       Reparacion, RegistroHoras, ParteUsada; reglas.ts (horas, eficiencia)
+  src/integraciones/      Bandeja de salida (evento.entity, bandeja, despachador), conector MCP, contrato.ts,
+                          idempotencia.ts (unaVez + mensajes_recibidos), concesionario/ (proveedor simulado o MCP)
+  src/mcp/                herramientas.ts (servidor por petición; herramientasDe(rol)), flujo.ts (recursos)
+  pruebas/                simular.mjs (casos), flujo.mjs (punta a punta REST), agentes.mjs (usuarios y
+                          clientes MCP compartidos), entrar.mjs, probar-mcp.mjs, comun.mjs
+docs/integracion/         README (flujo y diagrama), concesionario.md, facturacion.md, datos-simulados.md
 web/src/
-  api/                    cliente.ts (fetch + token en sessionStorage + 401 → salir), tipos.ts
+  api/                    cliente.ts (fetch + token en sessionStorage + 401 → salir; subirArchivo,
+                          abrirArchivo), tipos.ts
   sesion/                 SesionProvider, usarSesion, RutaProtegida
   tema/                   TemaProvider, usarTema, InterruptorTema (claro/oscuro)
-  logica/                 formato (pesos, fechas, tonos, cuenta, nombreRol), permisos (espejo de la API),
-                          costos (espejo), usarDatos/usarAccion
-  componentes/            Boton, Etiqueta/Pulso/EstadoOrden, Avatar/GrupoAvatares, Superficies (Tarjeta,
-                          Contorno, Ventana, Metrica, Encabezado, Ceja, Aviso, Cargando), Campos, Tabla,
-                          BarraNav (y Marca)
-  paginas/                Entrar, Panel, Ordenes, OrdenDetalle, Diagnostico, Reparacion, MisTrabajos,
-                          Inventario, Clientes, Usuarios, Roles, Integraciones, SinAcceso
-  pruebas/                preparar.ts, utilidades.tsx (renderizar, simularApi, orden)
+  logica/                 formato (pesos, fechas, tonos, nombres de estados, causas y pagadores),
+                          permisos (espejo de la API), costos (espejo), usarDatos/usarAccion
+  componentes/            Boton, Etiqueta/EstadoOrden, Avatar/GrupoAvatares, Superficies (Tarjeta, Contorno,
+                          Ventana, Metrica, Encabezado, Ceja, Aviso, Cargando), Campos, Tabla, BarraNav,
+                          Marca, FichaOrden (vehículo por VIN, garantía, mensajes, prediagnóstico)
+  paginas/                Entrar, MisTrabajos, OrdenDetalle, Diagnostico, Reparacion, Usuarios, SinAcceso
+  pruebas/                preparar.ts, utilidades.tsx (renderizar, simularApi y datos de prueba)
 ```
 
 ## Convenciones
 
 - **Español en todo**: identificadores, rutas, archivos, mensajes de error y comentarios. Los comentarios explican el porqué, en frases cortas.
-- **Una carpeta por funcionalidad** con `x.entity.ts`, `x.service.ts`, `dto.ts` y `reglas.ts`. Las reglas de negocio puras van en `reglas.ts` para probarlas sin base de datos. Los services orquestan y las rutas no tienen lógica.
-- **Las reglas viven en los services y en `reglas.ts`**, nunca en las rutas ni en el MCP: las cumple quien entre por cualquier puerta.
-- **Errores**: lance `invalido`, `prohibido`, `noEncontrado`, `conflicto` (de `comun/errores.ts`). La ruta los vuelve `{ message }` con su código. El MCP los devuelve como resultado con `isError`. No use `throw new Error` para errores de negocio.
-- **Lo ajeno da 404, no 403**: un mecánico que pide una orden que no tiene asignada recibe 404 (`puedeVerOrden`).
+- **Una carpeta por funcionalidad** con `x.entity.ts`, `x.service.ts`, `dto.ts` y `reglas.ts`. Las reglas de negocio puras van en `reglas.ts` para probarlas sin base de datos. Los services orquestan; las rutas y el MCP no tienen lógica.
+- **Las reglas viven en los services y en `reglas.ts`**: las cumple quien entre por cualquier puerta (web, MCP o simulador).
+- **Errores**:
+  - Lance `invalido`, `prohibido`, `noEncontrado`, `conflicto` o `noDisponible` (de `comun/errores.ts`). No use `throw new Error` para errores de negocio.
+  - La ruta los vuelve `{ message }` con su código. El MCP los devuelve como resultado con `isError`.
+  - Una orden que ya tomó otro mecánico responde 409.
+- **Lo ajeno da 404, no 403**: un mecánico que pide una orden de otra sede o que no tiene asignada recibe 404 (`puedeVerOrden`).
 - **TypeORM con Next**:
   - Cada `@Column` declara su `type`, porque no se usa la metadata de los decoradores.
   - Las relaciones usan `Relation<>`.
   - Toda entidad nueva se agrega a `base-datos/entidades.ts`.
-  - Las columnas `numeric` usan el transformer `numerico`, y los montos se redondean con `pesos()`.
+  - Las columnas `numeric` usan el transformer `numerico`.
   - Las tablas solo cambian con migraciones (`synchronize: false`).
+  - `bd()` rehace la conexión si la recarga en caliente cambió alguna clase de entidad.
 - **Rutas**:
   - `export const runtime = 'nodejs'`.
   - Se envuelven con `ruta(ROLES, async ({ req, actor, params, url }) => …, estadoExito)`.
-  - Los grupos de roles son `PERSONAL`, `TALLER` y `SOLO_ADMIN` (`usuarios/rol.entity.ts`).
+  - Los grupos de roles son `TALLER` (todos), `GESTION` (administrador y agente) y `SOLO_ADMIN` (`usuarios/rol.entity.ts`).
   - Los ids de la ruta se leen con `entero()`.
-- **DTOs zod**: para editar, construya el esquema con campos **sin** `.default()`. `.partial()` conserva los defaults y reescribiría valores que no se enviaron (ya pasó con kilometraje y nivel de alerta).
-- **Existencias**: solo cambian con `moverExistencias(tx, …)`, dentro de una transacción. Esa función bloquea la fila (`FOR UPDATE`) y deja el `Movimiento`.
-- **Integraciones**: un service nunca llama directo a otro proyecto. Escribe con `encolar(tx, destino, herramienta, datos)` dentro de su transacción y después llama `avisarDespacho()`.
+- **DTOs zod**: para editar, construya el esquema con campos **sin** `.default()`. `.partial()` conserva los defaults y reescribiría valores que no se enviaron.
+- **Integraciones**:
+  - Un service nunca llama directo a otro agente. Escribe con `encolar(tx, destino, herramienta, datos)` dentro de su transacción y después llama `avisarDespacho()`.
+  - La única excepción es el concesionario: se consulta en línea con `concesionario()` (relación, VIN y garantía). Es el simulado si no hay `MCP_CONCESIONARIO_URL`.
+- **Idempotencia**: toda herramienta MCP que cambia algo acepta `id_mensaje` y se envuelve con `unaVez(id_mensaje, herramienta, fn)`.
+- **Sin inventario**: no hay existencias, precios de repuestos ni tiendas en el taller. Los repuestos se piden por código universal y cantidad; las partes usadas solo se registran.
 
 ## Reglas de dominio
 
-**Estados de la orden** (mapa `SIGUIENTE` en `ordenes/reglas.ts`):
-- `recibido → en_diagnostico → diagnosticado → aprobado → en_reparacion → terminado → entregado`.
-- Se puede pasar a `cancelado` desde cualquier estado antes de `terminado`. Cancelar exige un motivo, cancela el diagnóstico en borrador y la reparación en curso, y no devuelve partes ya usadas.
+**Estados de la orden** (mapa `SIGUIENTE` y `PASOS` en `ordenes/reglas.ts`):
+- `agendada → en_diagnostico → (remitida → en_diagnostico) → validando_garantia → en_cotizacion → aprobada → en_reparacion → pendiente_facturacion → facturada → entregada`.
+- `en_cotizacion → rechazada → entregada`: el vehículo sale sin reparar.
+- Se puede pasar a `cancelada`, con motivo, desde cualquier estado antes de `en_reparacion`.
 
 **Qué dispara cada cambio:**
-- Asignar el primer mecánico de **diagnóstico** abre el diagnóstico (tarifa = `TALLER_TARIFA_HORA`) y pasa la orden a `en_diagnostico`.
-- Finalizar el diagnóstico la pasa a `diagnosticado`.
-- Aprobar (recepción) la pasa a `aprobado`.
-- Asignar el primer mecánico de **reparación** abre la reparación y la pasa a `en_reparacion`.
-- Terminar fija el total y la pasa a `terminado`.
-- Entregar la pasa a `entregado`.
-- Un vehículo no puede tener dos órdenes abiertas.
+
+| Llamada | Quién | Efecto |
+|---|---|---|
+| `agendar_cita` | Concesionario | Crea la orden `agendada` en una franja libre. Lleva los mensajes del cliente y el prediagnóstico, y puede venir `por_garantia`. Un `id_relacion` no puede tener dos órdenes abiertas. |
+| `tomar_orden` | Mecánico de la sede | La saca de la cola: `agendada` o `remitida` pasan a `en_diagnostico`, y `aprobada` pasa a `en_reparacion`. |
+| `remitir_orden` | Mecánico de mantenimiento | Agrega la tarea fija `REV-GENERAL` (hecha y cobrada) y pasa la orden a `remitida`, en la sede especializada. |
+| `finalizar_diagnostico` | Mecánico | Pasa a `validando_garantia` y le pide la validación al concesionario. **Toda orden se consulta.** |
+| `registrar_resultado_garantia` | Concesionario | Pasa a `en_cotizacion` y encola `crear_cotizacion` a facturación. |
+| `registrar_respuesta_cliente` | Facturación | Pasa a `aprobada` (guarda la orden de compra) o a `rechazada`. |
+| `terminar_reparacion` | Mecánico | Pasa a `pendiente_facturacion` y encola `notificar_reparacion_terminada`. |
+| `registrar_pago` | Facturación | Pasa a `facturada`. |
+| `registrar_salida` | Gestión | Pasa a `entregada`. |
+| Cada cambio de estado | — | Encola `notificar_estado_vehiculo` al concesionario. |
+
+**Prediagnóstico** (`prediagnostico/`):
+- El agente lee los mensajes del cliente y responde con datos del catálogo:
+  - Especialidad.
+  - SKU probables.
+  - Confianza.
+  - Resumen.
+  - **Ruta**:
+    - `especializada`: confianza ≥ 0,6 y hay sede con esa especialidad.
+    - `revision_general`: si no, va a mantenimiento.
+- Si el modelo no responde o sale del catálogo, se usan las palabras clave del SKU (`fuente: 'reglas'`).
 
 **Costos:**
-- **Costo estimado** = Σ(horas estimadas × tarifa) + Σ valor del servicio + Σ(cantidad × precio de los repuestos). Las piezas fuera de inventario llevan un precio estimado.
-- **Liquidación** = Σ valor del servicio de las tareas **completadas** + Σ horas registradas × tarifa + Σ partes usadas (precio del momento).
-- Un registro de horas dura de 0 a 16 h. Para terminar hace falta al menos uno.
-- **Alerta de inventario**: cuando `cantidad <= nivel_alerta`. Una salida sin existencias responde 409.
+- **Mano de obra** = Σ precio fijo del SKU de cada servicio. La revisión general se cobra junto con la especialidad.
+- Las **horas** son solo de control. Un registro dura de 0 a 16 h, y para terminar hace falta al menos uno y un servicio hecho.
+- **Repuestos**: el taller no los cotiza.
+- `total_mano_obra_cliente` descuenta las líneas con garantía válida.
+
+**Garantía** (`garantias/reglas.ts`):
+
+| Causa | Dictamen sugerido | Paga si el concesionario la valida |
+|---|---|---|
+| `defecto_fabrica` | aplica | fabricante |
+| `repuesto_defectuoso` | aplica | tienda |
+| `mala_instalacion_taller` | aplica | taller |
+| `manipulacion_cliente` | no aplica | cliente |
+| `desgaste_normal` | no aplica | cliente |
+
+- El mecánico puede cambiar el dictamen sugerido. Cada servicio con causa necesita un motivo.
+- **Evidencia obligatoria** si el dictamen dice que aplica o si la orden vino por garantía. Son fotos JPG, PNG o WEBP, o PDF, de hasta 5 MB; el tipo se verifica por la firma del archivo.
+- **Cobertura** desde el `id_relacion`: 3 años desde la venta o 60.000 km, y solo los sistemas que cubre.
+- Si la garantía no es válida, paga el cliente. `mensaje_garantia` explica por qué, para el Telegram de facturación.
 
 **Permisos:**
 
-| Acción | Admin | Recepción | Mecánico |
+| Acción | Admin | Agente | Mecánico |
 |---|---|---|---|
-| Usuarios, descripción de los roles, integraciones | ✔ | — | — |
-| Clientes, vehículos, crear orden, asignar, aprobar, entregar, cancelar | ✔ | ✔ | — |
-| Inventario: crear, editar, movimientos | ✔ | ✔ | Solo consulta |
-| Registrar diagnóstico, horas, partes, tareas | ✔ | — | Solo si está asignado a esa etapa |
-| Cambiar la tarifa por hora | ✔ | ✔ | — |
-| Ver órdenes | Todas | Todas | Las asignadas |
-| Panel | ✔ | ✔ | — |
+| Usuarios (con sede para el mecánico) | ✔ | — | — |
+| Todas las herramientas MCP | ✔ | ✔ | Solo las suyas (`HERRAMIENTAS_MECANICO`) |
+| Ver órdenes | Todas | Todas | La cola de su sede y las asignadas |
+| Tomar una orden | Para un mecánico (`mecanico_id`) | Para un mecánico (`mecanico_id`) | Para sí, solo en su sede |
+| Diagnóstico, evidencias, remitir, horas, partes, tareas | ✔ | ✔ | Solo si está asignado a esa etapa |
+| Agendar, cancelar, garantía, cotización, pago, salida | ✔ | ✔ | — |
+| Web | Mis trabajos (todas) + Usuarios | Sin pantallas | Mis trabajos, Orden, Diagnóstico, Reparación |
 
-- El rol `concesionario` solo usa `POST /api/integraciones/concesionario/ingresos`, `GET …/vehiculos/:referencia` y sus 2 herramientas MCP, y ve únicamente las órdenes de origen concesionario.
-- **Los roles son fijos**: administrador, recepcionista, mecánico y concesionario. Los crea la semilla y no se pueden crear ni borrar, porque los permisos del código dependen de su nombre. El administrador solo edita su descripción (`PATCH /api/roles/:id`) y cambia el rol de cada usuario. Si algún día hace falta un rol nuevo, se agrega en `ROLES_SISTEMA`, en la semilla, en los permisos de la API y en `web/src/logica/permisos.ts`.
+- **Los roles son fijos**: `administrador`, `mecanico` y `agente` (`ROLES_SISTEMA`). Los crea la semilla y no se pueden crear ni borrar.
+- `agente` es el rol de los sistemas externos y orquestadores. Hay un usuario por sistema, para que el historial diga quién hizo cada cosa.
+- Un mecánico **debe** tener sede.
+- Si hace falta un rol nuevo, se agrega en `ROLES_SISTEMA`, en la semilla, en los permisos de la API, en `HERRAMIENTAS_MECANICO`/`herramientasDe` y en `web/src/logica/permisos.ts`.
 
 ## Estilo visual: `DESIGN.md` es obligatorio
 
@@ -166,23 +234,23 @@ La web usa el sistema «ClickUp» de `DESIGN.md`: tema claro, tipografía pesada
 - **Tipografía**:
   - Plus Jakarta Sans 700/800 en títulos (`h1`–`h3` ya la usan), con tracking negativo (`text-heading` = 48 px, -0.035em).
   - Inter para el cuerpo (16 / 14 px).
-  - Sometype Mono 12 px en MAYÚSCULAS con tracking 0.06em (utilidad `mono`) para cejas, encabezados de tabla y etiquetas técnicas.
+  - Sometype Mono 12 px en MAYÚSCULAS con tracking 0.06em (utilidad `mono`) para cejas, encabezados de tabla, SKU y códigos de repuesto.
   - Las etiquetas de los campos van en Inter 14 px 500.
 - **Botones** (`Boton`), siempre píldora (`rounded-full`), Plus Jakarta 14 px 700:
   - `primario`: `#202020` relleno (en oscuro, Mist). Uno por pantalla, para la acción principal.
   - `contorno`: borde `#e8e8e8`, sin relleno. Es el valor por defecto.
-  - `azul`: borde azul `#0091ff`, para una acción interactiva secundaria.
+  - `azul`: borde azul `#0091ff`, para una acción interactiva secundaria (adjuntar evidencia, remitir).
   - `suave`: compacto, con fondo sutil, para filas y barras.
 - **Estados** con `Etiqueta` / `EstadoOrden` (píldoras de 12 px 600):
 
   | Tono | Píldora | Estados de la orden |
   |---|---|---|
-  | `progreso` | azul `#0091ff`, texto blanco | en diagnóstico, en reparación |
-  | `revision` | violeta `#6647f0` | por aprobar |
-  | `aprobado` | teal `#16c0a4` | aprobado |
-  | `listo` | menta `#6ee7b7`, texto oscuro | terminado, entregado |
-  | `alerta` | magenta `#fb49a5` (sale del degradado cónico) | stock bajo, fallas |
-  | `neutro` | gris | recibido, cancelado |
+  | `progreso` | azul `#0091ff`, texto blanco | en diagnóstico, remitida, en reparación |
+  | `revision` | violeta `#6647f0` | validando garantía, en cotización, pendiente de facturación (esperan a otro agente) |
+  | `aprobado` | teal `#16c0a4` | aprobada |
+  | `listo` | menta `#6ee7b7`, texto oscuro | facturada, entregada; garantía válida |
+  | `alerta` | magenta `#fb49a5` (sale del degradado cónico) | rechazada; garantía no válida |
+  | `neutro` | gris | agendada, cancelada |
 
 - **Radios**: 9 px en campos (`rounded-lg`), 12 px en tarjetas y tablas (`rounded-xl`), 20 px en paneles grandes (`rounded-2xl-2`), píldora en botones, etiquetas y navegación.
 - **Superficies planas**:
@@ -193,10 +261,11 @@ La web usa el sistema «ClickUp» de `DESIGN.md`: tema claro, tipografía pesada
 - **Avatares** (`Avatar`, `GrupoAvatares`) con iniciales para personas: mecánicos y usuario en sesión.
 - **Borde arcoíris** (`borde-arcoiris`): el degradado cónico que gira, **uno por página como máximo** (hoy solo en la tarjeta de inicio de sesión). Gira cada 4 s, no cada 0,45 s como dice DESIGN.md (demasiado rápido para una pantalla de trabajo), y se detiene con `prefers-reduced-motion`.
 - **Movimiento**: transiciones de 0.15 s en hover, curva `ease-asentar`.
+- **Celular**: el mecánico trabaja junto al carro. La subida de evidencias usa `capture="environment"` para abrir la cámara.
 
 **No:**
 - Colores fuera de los tokens.
-- Violeta o azul como relleno de botones. El violeta es solo el estado «por aprobar».
+- Violeta o azul como relleno de botones. El violeta es solo el estado «espera a otro agente».
 - Degradados en tarjetas o fondos (solo el borde arcoíris).
 - Sombras fuertes o apiladas.
 - Radios distintos dentro del mismo tipo de componente.
@@ -211,71 +280,81 @@ La web usa el sistema «ClickUp» de `DESIGN.md`: tema claro, tipografía pesada
 
 ## MCP del taller
 
-`POST /api/auth/token-mcp` (con sesión web) entrega un token de 7 días para `/mcp`. Con él se crea un servidor por petición, y `herramientasDe(rol)` decide qué ve cada rol.
+`POST /api/auth/token-mcp` (con sesión web) entrega un token de 7 días para `/mcp`. Con él
+se crea un servidor por petición. `herramientasDe(rol)` da **todas** las herramientas al
+`agente` y al administrador, y al mecánico solo las suyas.
 
-**Herramientas por rol:**
-- **Todos los del taller:**
-  - `consultar_ordenes`
-  - `consultar_diagnostico`
-  - `consultar_reparacion`
-  - `consultar_inventario`
-- **Mecánico y admin:**
-  - `registrar_diagnostico`
-  - `finalizar_diagnostico`
-  - `registrar_horas`
-  - `registrar_parte_usada`
-  - `marcar_tarea`
-  - `terminar_reparacion`
-- **Recepción y admin:**
-  - `panel_taller`
-  - `consultar_disponibilidad`
-  - `asignar_mecanico`
-  - `buscar_clientes`
-  - `registrar_cliente`
-  - `registrar_vehiculo`
-  - `crear_orden`
-  - `cambiar_estado_orden`
-  - `actualizar_inventario`
-  - `cancelar_orden` (`destructiveHint`)
-- **Concesionario** (y personal):
-  - `registrar_ingreso_vehiculo`
-  - `estado_vehiculo`
+**Herramientas** (agrupadas por quién las usa normalmente):
 
-**Reglas para las herramientas:**
-- Sus esquemas zod son simples (sin `transform`) y dentro se valida con el DTO de la API (`validar(dto, …)`), así la normalización es la misma.
-- Una herramienta nueva se registra en `herramientasDe` y con `if (si('nombre'))`. Agregue su prueba en `src/mcp/herramientas.test.ts` (cliente en memoria).
+| Grupo | Herramientas |
+|---|---|
+| Orquestador | `describir_flujo`, `estado_orden`, `listar_ordenes` |
+| Concesionario | `listar_talleres`, `prediagnosticar`, `consultar_disponibilidad`, `agendar_cita`, `cancelar_cita` (`destructiveHint`), `consultar_evidencias`, `registrar_resultado_garantia` |
+| Facturación | `consultar_cotizacion`, `registrar_respuesta_cliente`, `registrar_pago` |
+| Mecánico | `mis_ordenes`, `tomar_orden`, `consultar_diagnostico`, `registrar_diagnostico`, `adjuntar_evidencia` (base64), `remitir_orden`, `finalizar_diagnostico`, `consultar_reparacion`, `registrar_horas`, `registrar_parte_usada`, `marcar_tarea`, `terminar_reparacion`, `consultar_servicios`, `buscar_codigos_repuesto` |
+| Administración | `registrar_taller`, `actualizar_taller`, `registrar_servicio`, `registrar_salida`, `consultar_bandeja`, `reintentar_envios` |
 
-**Conectar Claude Code:** `.mcp.json` registra este servidor. Defina `TALLER_MCP_TOKEN` en el entorno antes de abrir Claude Code (se obtiene con `node api/pruebas/entrar.mjs`; queda en `api/pruebas/.token-mcp`).
+**Recursos:**
+- `taller://flujo` y `taller://contrato`: salen de `mcp/flujo.ts`, generados con `SIGUIENTE`, `PASOS` y `CONTRATO`, así nunca se desactualizan.
+- `taller://talleres` y `taller://servicios`.
 
-## Contrato con los otros proyectos (MCP salientes)
+**Reglas para las herramientas (son para orquestadores):**
+- Cada herramienta declara `outputSchema` y devuelve `structuredContent`.
+- Toda respuesta sobre una orden trae `estado`, `siguiente_paso { responsable, descripcion }` y `acciones_disponibles` (de `PASOS`).
+- Las que cambian algo aceptan `id_mensaje` y usan `unaVez`.
+- Sus esquemas zod son simples (sin `transform`). Dentro se valida con el DTO de la API (`validar(dto, …)`), así la normalización es la misma que en REST.
+- Una herramienta nueva:
+  1. Se registra en `herramientasDe` (y en `HERRAMIENTAS_MECANICO` si es del mecánico).
+  2. Si es de un agente, se agrega a `ENTRANTES` de `mcp/flujo.ts`.
+  3. Su prueba va en `src/mcp/herramientas.test.ts` (cliente en memoria).
 
-Se configuran con `MCP_<DESTINO>_URL` y `MCP_<DESTINO>_TOKEN`. Sin URL, el destino está **desactivado**: el evento queda en `eventos_integracion` con ese estado y se reenvía con `POST /api/integraciones/reintentar` (o el botón en la pantalla Integraciones). Hay 5 intentos antes de quedar `fallido`. El contrato está en `api/src/integraciones/contrato.ts`:
+**Conectar Claude Code:**
+- `.mcp.json` registra este servidor.
+- Defina `TALLER_MCP_TOKEN` en el entorno antes de abrir Claude Code.
+- El token se obtiene con `node api/pruebas/entrar.mjs` y queda en `api/pruebas/.token-mcp`.
+
+## Contrato con los otros agentes (MCP salientes)
+
+Se configuran con `MCP_<DESTINO>_URL` y `MCP_<DESTINO>_TOKEN`.
+- **Concesionario sin URL:** se usa el proveedor **simulado** (`integraciones/concesionario/simulado/`), que valida la garantía al instante.
+- **Facturación sin URL:** el destino queda **desactivado**. El mensaje se guarda en `eventos_integracion` y se reenvía con `reintentar_envios`.
+- Hay 5 intentos antes de quedar `fallido`.
+
+El contrato está en `api/src/integraciones/contrato.ts`, con ejemplos en `docs/integracion/`.
 
 | Destino | Herramienta que el taller llama | Cuándo |
 |---|---|---|
-| partes | `buscar_parte { texto }` | En línea, `GET /api/integraciones/partes?buscar=` |
-| partes | `solicitar_parte { orden, placa, vehiculo, codigo, descripcion, cantidad }` | Al finalizar un diagnóstico con piezas fuera de inventario o sin stock |
-| facturacion | `emitir_factura { orden, cliente, vehiculo, origen, lineas[{concepto,cantidad,valor_unitario}], total }` | Al terminar la reparación |
-| concesionario | `notificar_estado_vehiculo { referencia_externa, placa, orden, estado, nota, fecha }` | En cada cambio de estado de una orden de origen concesionario |
-
-En la otra dirección, el concesionario envía carros con `registrar_ingreso_vehiculo` (MCP) o `POST /api/integraciones/concesionario/ingresos`, y consulta con `estado_vehiculo`.
+| concesionario | `consultar_relacion { id_relacion }`, `decodificar_vin { vin }` | En línea, al prediagnosticar o agendar |
+| concesionario | `validar_garantia { codigo, id_relacion, vin, por_garantia, motivo_reclamo, servicios[] }` | Al finalizar cada diagnóstico; responde con `registrar_resultado_garantia` |
+| concesionario | `notificar_estado_vehiculo { codigo, id_relacion, placa, sede, estado, nota, fecha }` | En cada cambio de estado |
+| facturacion | `crear_cotizacion { …, mano_obra[] con precio, repuestos[] sin precio, mensaje_garantia }` | Al validar la garantía; responde con `registrar_respuesta_cliente` |
+| facturacion | `notificar_reparacion_terminada { mano_obra_realizada[], partes_usadas[], total_mano_obra }` | Al terminar la reparación; responde con `registrar_pago` |
 
 ## Pruebas: cada funcionalidad se da por válida solo con sus pruebas
 
 - **API** (`api`, `npm run pruebas`):
   - Las reglas puras van en `src/**/reglas.ts` + `*.test.ts`.
-  - Las rutas se prueban en `app/**/route.test.ts` con `vi.mock` de los services y `peticion()` / `conParams()` / `actorDe()` de `src/comun/pruebas.ts`.
-  - Lo transaccional se prueba con un `EntityManager` falso (ver `inventario.test.ts`, `ordenes.test.ts`).
-  - El MCP se prueba con `InMemoryTransport` (`src/mcp/herramientas.test.ts`).
+  - Las rutas se prueban en `app/**/route.test.ts` con `vi.mock` de los services y `peticion()` / `conParams()` / `actorDe(rol, id, tallerId)` de `src/comun/pruebas.ts`.
+  - Lo transaccional se prueba con un `EntityManager` falso (ver `ordenes.test.ts`, `diagnosticos.test.ts`).
+  - El agente de prediagnóstico se prueba con el modelo simulado: respuesta válida, fuera de catálogo y caída.
+  - El MCP se prueba con `InMemoryTransport` (`src/mcp/herramientas.test.ts`): qué ve cada rol, `id_mensaje` y `siguiente_paso`.
 - **Web** (`web`, `npm run pruebas`):
   - La lógica va en `logica/*.test.ts`.
-  - Componentes y páginas se prueban con `renderizar(ui, { actor, ruta, patron, rutas })` y `simularApi()` de `src/pruebas/utilidades.tsx`, que reemplazan fetch con una tabla de rutas.
-- **Punta a punta** (`api`, `npm run flujo`): recorre el flujo completo con todos los roles contra la API y la base reales. Requiere la API en marcha y las variables `TALLER_ADMIN_*`. Cada corrida inicia sesión 6 veces y el límite es de 10 por minuto por IP: entre corridas, espere un minuto o recibirá 429.
+  - Componentes y páginas se prueban con `renderizar(ui, { actor, ruta, patron, rutas })` y `simularApi()` de `src/pruebas/utilidades.tsx`. Reemplazan fetch con una tabla de rutas, y un `FormData` llega tal cual.
+  - Los datos de prueba (`orden()`, `diagnostico()`, `reparacion()`, `sede()`, `catalogo`) están en el mismo archivo.
+- **Simulador** (`api`, `npm run simular -- todos`):
+  - Corre los 11 casos de garantía, ruta, remisión y rechazo por MCP, siguiendo `siguiente_paso`.
+  - Crea una vez los usuarios agente y un mecánico por sede, y guarda sus claves y tokens en `pruebas/.usuarios-simulacion.json` (en `.gitignore`).
+- **Punta a punta** (`api`, `npm run flujo`):
+  - El lado manual por REST: cola de la sede, tomar, remitir, diagnóstico con evidencia, reparación y partes usadas.
+  - Revisa los permisos (401, 403, 404 de lo ajeno, 409, 400).
+  - Reutiliza los tokens guardados, así no choca con el límite de 10 inicios de sesión por minuto.
+- Los dos requieren la API en marcha y `TALLER_ADMIN_*`. Sin Ollama, el prediagnóstico usa reglas y los casos pasan igual.
 
 ## Antes de dar una tarea por terminada
 
 1. `npm run tipos` y `npm run pruebas` en `api` y en `web`, sin errores.
 2. Si cambió una entidad: `npm run migracion:generar -- src/base-datos/migraciones/<Nombre>`, revise el SQL y corra `npm run migracion:correr`.
-3. Si cambió una regla o un permiso: actualice `web/src/logica/permisos.ts` o `costos.ts` (son espejos) y las tablas de esta guía.
-4. Si tocó el flujo de órdenes: `npm run flujo` con la API en marcha.
+3. Si cambió una regla o un permiso: actualice `web/src/logica/permisos.ts`, `costos.ts` o `formato.ts` (`dictamenSugerido`), que son espejos; las tablas de esta guía; y `docs/integracion/` si cambia el contrato.
+4. Si tocó el flujo de órdenes o el MCP: `npm run simular -- todos` y `npm run flujo` con la API en marcha.
 5. Si tocó la interfaz: revísela en el navegador en tema claro y oscuro, a ancho de escritorio y de móvil, contra las reglas de DESIGN.md.

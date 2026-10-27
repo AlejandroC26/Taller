@@ -1,34 +1,32 @@
 import type { Destino } from './evento.entity';
 
-// Contrato con los otros proyectos: qué herramienta MCP espera el taller en cada uno y
-// con qué datos la llama. Cuando esos proyectos existan, sus servidores MCP deben
-// exponer estas herramientas (o se ajusta aquí el nombre).
+// Contrato con los otros agentes: qué herramienta MCP llama el taller en cada uno y con
+// qué datos. Cuando esos sistemas existan, sus servidores MCP deben exponer estas
+// herramientas (o se ajusta aquí el nombre). La documentación completa, con ejemplos,
+// está en docs/integracion/.
 export const CONTRATO: Record<Destino, { descripcion: string; herramientas: Record<string, string> }> = {
-  partes: {
-    descripcion: 'Proyecto de partes de vehículos: catálogo y pedidos de repuestos',
+  concesionario: {
+    descripcion: 'Concesionario: dueño de la relación cliente–vehículo (id_relacion), de la API del VIN y de la garantía',
     herramientas: {
-      buscar_parte: '{ texto } → lista de partes con codigo, nombre, precio y disponibilidad',
-      solicitar_parte:
-        '{ orden, placa, vehiculo, codigo|null, descripcion, cantidad } → confirmación del pedido',
+      consultar_relacion: '{ id_relacion } → cliente, vehículo (cabecera del VIN), kilometraje y garantía vigente',
+      decodificar_vin: '{ vin } → marca, modelo, versión, carrocería, puertas, motor…',
+      validar_garantia:
+        '{ codigo, id_relacion, vin, por_garantia, motivo_reclamo, servicios[{ tarea_id, sku, especialidad, causa, aplica, motivo, evidencias[url] }] } → responde llamando registrar_resultado_garantia en el MCP del taller',
+      notificar_estado_vehiculo: '{ codigo, id_relacion, placa, sede, estado, nota, fecha } → acuse de recibo',
     },
   },
   facturacion: {
-    descripcion: 'Proyecto de facturación: emite la factura de la reparación',
+    descripcion: 'Facturación: cotiza los repuestos con las tiendas, avisa al cliente por Telegram y cobra con PSE',
     herramientas: {
-      emitir_factura:
-        '{ taller, orden, cliente{documento,nombre,correo,telefono}, vehiculo{placa,marca,modelo}, origen, lineas[{concepto,cantidad,valor_unitario}], total } → número de factura',
-    },
-  },
-  concesionario: {
-    descripcion: 'Sistema del concesionario que envía carros al taller',
-    herramientas: {
-      notificar_estado_vehiculo:
-        '{ referencia_externa, placa, orden, estado, nota, fecha } → acuse de recibo',
+      crear_cotizacion:
+        '{ codigo, id_relacion, taller, sede, cliente, vehiculo, mano_obra[{ sku, descripcion, precio, garantia }], repuestos[{ codigo_repuesto, descripcion, cantidad, garantia }], total_mano_obra, mensaje_garantia } → responde llamando registrar_respuesta_cliente',
+      notificar_reparacion_terminada:
+        '{ codigo, id_relacion, mano_obra_realizada[], servicios_no_realizados[], partes_usadas[], total_mano_obra } → envía el PSE y responde llamando registrar_pago',
     },
   },
 };
 
-// Variables de entorno de cada destino: MCP_PARTES_URL, MCP_PARTES_TOKEN…
+// Variables de entorno de cada destino: MCP_CONCESIONARIO_URL, MCP_CONCESIONARIO_TOKEN…
 export function configuracion(destino: Destino, entorno: Record<string, string | undefined> = process.env) {
   const prefijo = `MCP_${destino.toUpperCase()}`;
   const url = entorno[`${prefijo}_URL`]?.trim();

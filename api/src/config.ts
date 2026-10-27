@@ -4,9 +4,12 @@ import { join } from 'node:path';
 // Carpeta de la API (taller/api). Los comandos npm siempre se ejecutan desde aquí.
 export const RAIZ = process.cwd();
 
-// Las variables están en SENA-IA/.env, el mismo archivo de los otros proyectos.
-const archivo = join(RAIZ, '..', '..', '.env');
-if (existsSync(archivo)) process.loadEnvFile(archivo);
+// Las variables están en SENA-IA/.env, el mismo archivo de los otros proyectos. Los
+// valores de desarrollo de api/.env.local (fuera del repositorio) se cargan primero y
+// tienen prioridad, igual que en Next.
+for (const archivo of [join(RAIZ, '.env.local'), join(RAIZ, '..', '..', '.env')]) {
+  if (existsSync(archivo)) process.loadEnvFile(archivo);
+}
 
 // Una variable obligatoria que falta detiene el programa con un mensaje claro.
 export function requerida(nombre: string): string {

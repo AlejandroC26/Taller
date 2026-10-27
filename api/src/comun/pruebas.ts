@@ -1,12 +1,13 @@
 // Ayudas para las pruebas unitarias de rutas (no se usan en producción).
 import type { Actor } from '../usuarios/actor';
 
-export const actorDe = (rol: string, id = `id-${rol}`): Actor => ({
+export const actorDe = (rol: string, id = `id-${rol}`, tallerId: number | null = rol === 'mecanico' ? 1 : null): Actor => ({
   id,
   nombre: rol,
   apellido: 'Prueba',
   usuario: rol,
   rol,
+  tallerId,
 });
 
 export function peticion(

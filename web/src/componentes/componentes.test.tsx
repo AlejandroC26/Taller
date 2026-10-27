@@ -106,7 +106,7 @@ describe('identidad del taller', () => {
 
 describe('barra de navegación', () => {
   it('lleva la marca del taller', async () => {
-    renderizar(<BarraNav />, { actor: actorDe('recepcionista') });
+    renderizar(<BarraNav />, { actor: actorDe('administrador') });
     expect(await screen.findByAltText('Logo del Taller Pulgas Locas')).toBeInTheDocument();
   });
 
@@ -114,18 +114,18 @@ describe('barra de navegación', () => {
     renderizar(<BarraNav />, { actor: actorDe('mecanico') });
     await waitFor(() => expect(screen.getByRole('link', { name: 'Mis trabajos' })).toBeInTheDocument());
     expect(screen.queryByRole('link', { name: 'Usuarios' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Clientes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Órdenes' })).not.toBeInTheDocument();
   });
 
-  it('el administrador ve usuarios, roles e integraciones', async () => {
+  it('el administrador ve órdenes y usuarios, sin roles ni integraciones', async () => {
     renderizar(<BarraNav />, { actor: actorDe('administrador') });
     await waitFor(() => expect(screen.getByRole('link', { name: 'Usuarios' })).toBeInTheDocument());
-    expect(screen.getByRole('link', { name: 'Roles' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Integraciones' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Órdenes' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Roles' })).not.toBeInTheDocument();
   });
 
   it('salir cierra la sesión', async () => {
-    renderizar(<BarraNav />, { actor: actorDe('recepcionista') });
+    renderizar(<BarraNav />, { actor: actorDe('administrador') });
     await userEvent.click(await screen.findByRole('button', { name: 'Salir' }));
     expect(sessionStorage.getItem('taller.token')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Salir' })).not.toBeInTheDocument();

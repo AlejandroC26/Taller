@@ -5,15 +5,21 @@ export const horasDto = z.object({
   fin: z.iso.datetime({ offset: true, message: 'Fecha de fin inválida (ISO 8601)' }),
   tareaId: z.number().int().positive().optional(),
   nota: z.string().trim().max(300).default(''),
-  // Solo el administrador registra horas a nombre de otro mecánico.
+  // Solo la gestión registra horas a nombre de otro mecánico.
   mecanicoId: z.uuid().optional(),
 });
 
+// Lo que se usó y gastó: código universal y cantidad. Si viene de la orden de compra de
+// facturación, se enlaza con compraId.
 export const parteDto = z.object({
-  itemId: z.number().int().positive('Elija un ítem del inventario'),
-  cantidad: z.number().int('La cantidad debe ser un número entero').min(1, 'La cantidad mínima es 1'),
+  codigoRepuesto: z.string().trim().toUpperCase().regex(/^[A-Z0-9._-]{2,40}$/, 'Código de repuesto inválido'),
+  descripcion: z.string().trim().max(160).optional(),
+  cantidad: z.number().int('La cantidad debe ser un número entero').min(1, 'La cantidad mínima es 1').max(100),
+  compraId: z.number().int().positive().optional(),
+  nota: z.string().trim().max(300).default(''),
 });
 
 export const tareaHechaDto = z.object({ completada: z.boolean() });
 
 export type DatosHoras = z.infer<typeof horasDto>;
+export type DatosParte = z.infer<typeof parteDto>;

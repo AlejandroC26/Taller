@@ -1,6 +1,6 @@
 import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
-export const DESTINOS = ['partes', 'facturacion', 'concesionario'] as const;
+export const DESTINOS = ['concesionario', 'facturacion'] as const;
 export type Destino = (typeof DESTINOS)[number];
 
 export const ESTADOS_EVENTO = ['pendiente', 'enviado', 'fallido', 'desactivado'] as const;

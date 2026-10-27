@@ -25,6 +25,8 @@ export const nuevoUsuarioDto = z.object({
     .regex(/^[a-z0-9._-]{3,40}$/, 'Usuario: de 3 a 40 letras minúsculas, números, punto, guion o guion bajo'),
   clave,
   rol: texto(40, 'El rol'),
+  // Sede del mecánico (obligatoria para el rol mecanico).
+  tallerId: z.number().int().positive().nullable().optional(),
 });
 
 export const editarUsuarioDto = nuevoUsuarioDto

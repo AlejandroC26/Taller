@@ -7,3 +7,5 @@ next-env.d.ts
 .env.local
 api/pruebas/.token-*
 api/pruebas/.usuarios-prueba.json
+api/pruebas/.usuarios-simulacion.json
+api/almacen/

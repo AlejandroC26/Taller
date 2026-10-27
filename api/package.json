@@ -1,7 +1,7 @@
 {
   "name": "taller-api",
   "version": "1.0.0",
-  "description": "API del Taller: Next.js con TypeORM y PostgreSQL, roles, órdenes de servicio, inventario y servidor MCP",
+  "description": "API del Taller Pulgas Locas S.A.S.: Next.js con TypeORM y PostgreSQL, sedes, órdenes de servicio con garantía y servidor MCP para agentes",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,7 +16,8 @@
     "pruebas": "vitest run",
     "pruebas:vigilar": "vitest",
     "flujo": "node pruebas/flujo.mjs",
-    "mcp": "node pruebas/probar-mcp.mjs"
+    "mcp": "node pruebas/probar-mcp.mjs",
+    "simular": "node pruebas/simular.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.3.1",

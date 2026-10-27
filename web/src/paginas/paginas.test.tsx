@@ -1,199 +1,241 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { actorDe, orden, renderizar } from '../pruebas/utilidades';
-import { Inventario } from './Inventario';
-import { MisTrabajos } from './MisTrabajos';
-import { etapaAsignable, OrdenDetallePagina } from './OrdenDetalle';
-import { Ordenes } from './Ordenes';
+import { actorDe, orden, renderizar, reparacion, sede, sedeFrenos } from '../pruebas/utilidades';
+import { destinoDe, MisTrabajos } from './MisTrabajos';
+import { OrdenDetallePagina } from './OrdenDetalle';
 import { ReparacionPagina } from './Reparacion';
-
-const items = [
-  { id: 1, codigo: 'BAT-12V', nombre: 'Batería', precio: 420000, cantidad: 1, nivelAlerta: 1, categoria: 'Eléctrico', categoriaId: 5, activo: true, enAlerta: true },
-  { id: 2, codigo: 'BUJ-01', nombre: 'Bujía', precio: 35000, cantidad: 16, nivelAlerta: 8, categoria: 'Motor', categoriaId: 6, activo: true, enAlerta: false },
-];
+import { cuerpoUsuario, Usuarios } from './Usuarios';
 
 describe('mis trabajos (mecánico)', () => {
-  it('muestra los carros asignados con el acceso a la etapa en curso', async () => {
+  it('a dónde lleva cada estado', () => {
+    expect(destinoDe({ codigo: 'OT-1', estado: 'en_diagnostico' })).toBe('/ordenes/OT-1/diagnostico');
+    expect(destinoDe({ codigo: 'OT-1', estado: 'en_reparacion' })).toBe('/ordenes/OT-1/reparacion');
+    expect(destinoDe({ codigo: 'OT-1', estado: 'validando_garantia' })).toBe('/ordenes/OT-1');
+  });
+
+  it('muestra la cola de su sede y sus órdenes con el acceso a la etapa', async () => {
     renderizar(<MisTrabajos />, {
       actor: actorDe('mecanico'),
       rutas: {
-        '/api/ordenes': [orden({ codigo: 'OT-0001', estado: 'en_diagnostico' }), orden({ codigo: 'OT-0002', estado: 'en_reparacion', vehiculo: { ...orden().vehiculo, placa: 'XYZ987' } })],
+        '/api/ordenes?vista=mias': [orden({ codigo: 'OT-0002', estado: 'en_diagnostico' })],
+        '/api/ordenes?vista=cola': [orden({ codigo: 'OT-0003', por_garantia: true })],
       },
     });
-    expect(await screen.findByText('2 carros asignados')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Diagnóstico →' })).toHaveAttribute('href', '/ordenes/OT-0001/diagnostico');
-    expect(screen.getByRole('link', { name: 'Reparación →' })).toHaveAttribute('href', '/ordenes/OT-0002/reparacion');
+    expect(await screen.findByText('1 orden mía')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Diagnosticar →' })).toHaveAttribute('href', '/ordenes/OT-0002/diagnostico');
+    expect(await screen.findByRole('button', { name: 'Tomar y diagnosticar' })).toBeInTheDocument();
+    expect(screen.getByText('Por garantía')).toBeInTheDocument();
   });
 
-  it('pide solo las órdenes abiertas', async () => {
-    const { llamadas } = renderizar(<MisTrabajos />, { actor: actorDe('mecanico'), rutas: { '/api/ordenes': [] } });
-    expect(await screen.findByText('No tiene carros asignados por ahora.')).toBeInTheDocument();
-    expect(screen.getByText('0 carros asignados')).toBeInTheDocument();
-    expect(llamadas.some((l) => l.url === '/api/ordenes?abiertas=1')).toBe(true);
-  });
-});
-
-describe('órdenes', () => {
-  it('la recepcionista abre una orden nueva', async () => {
-    const { llamadas } = renderizar(<Ordenes />, {
-      actor: actorDe('recepcionista'),
-      rutas: { 'GET /api/ordenes': [], 'POST /api/ordenes': orden({ codigo: 'OT-0009' }) },
+  it('tomar una orden de la cola la pide sin cuerpo y lleva al diagnóstico', async () => {
+    const { llamadas } = renderizar(<MisTrabajos />, {
+      actor: actorDe('mecanico'),
+      ruta: '/mis-trabajos',
+      patron: '/mis-trabajos',
+      rutas: {
+        '/api/ordenes?vista=mias': [],
+        '/api/ordenes?vista=cola': [orden()],
+        'POST /api/ordenes/OT-0001/tomar': orden({ estado: 'en_diagnostico' }),
+        '/api/ordenes/OT-0001/diagnostico': { estado: 404, json: { message: 'x' } },
+      },
     });
-    await userEvent.click(await screen.findByRole('button', { name: 'Nueva orden' }));
-    await userEvent.type(screen.getByLabelText('Placa'), 'abc123');
-    await userEvent.type(screen.getByLabelText('Motivo de ingreso'), 'Ruido al frenar');
-    await userEvent.click(screen.getByRole('button', { name: 'Abrir orden' }));
-    const post = llamadas.find((l) => l.metodo === 'POST');
-    expect(post?.cuerpo).toEqual({ placa: 'abc123', motivo: 'Ruido al frenar' });
+    await userEvent.click(await screen.findByRole('button', { name: 'Tomar y diagnosticar' }));
+    await waitFor(() => expect(llamadas.some((l) => l.metodo === 'POST' && l.url === '/api/ordenes/OT-0001/tomar')).toBe(true));
+    expect(llamadas.find((l) => l.url.endsWith('/tomar'))?.cuerpo).toBeUndefined();
   });
 
-  it('si el vehículo no existe ofrece registrarlo', async () => {
-    renderizar(<Ordenes />, {
-      actor: actorDe('recepcionista'),
-      rutas: { 'GET /api/ordenes': [], 'POST /api/ordenes': { estado: 404, json: { message: 'No existe un vehículo con la placa ABC123. Regístrelo primero' } } },
-    });
-    await userEvent.click(await screen.findByRole('button', { name: 'Nueva orden' }));
-    await userEvent.type(screen.getByLabelText('Placa'), 'ABC123');
-    await userEvent.type(screen.getByLabelText('Motivo de ingreso'), 'Revisión');
-    await userEvent.click(screen.getByRole('button', { name: 'Abrir orden' }));
-    expect(await screen.findByRole('link', { name: 'Registrar cliente y vehículo' })).toHaveAttribute('href', '/clientes');
-  });
-
-  it('el mecánico no ve el botón de nueva orden', async () => {
-    renderizar(<Ordenes />, { actor: actorDe('mecanico'), rutas: { '/api/ordenes': [orden()] } });
-    expect(await screen.findByText('ABC123')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Nueva orden' })).not.toBeInTheDocument();
+  it('el administrador ve todas las órdenes abiertas, sin cola', async () => {
+    const { llamadas } = renderizar(<MisTrabajos />, { actor: actorDe('administrador'), rutas: { '/api/ordenes?abiertas=1': [orden()] } });
+    expect(await screen.findByText('Órdenes abiertas')).toBeInTheDocument();
+    expect(screen.queryByText(/Cola de mi sede/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Tomar/ })).not.toBeInTheDocument();
+    expect(llamadas.some((l) => l.url === '/api/ordenes?vista=cola')).toBe(false);
   });
 });
 
 describe('detalle de la orden', () => {
-  it('etapa asignable según el estado', () => {
-    expect(etapaAsignable('recibido')).toBe('diagnostico');
-    expect(etapaAsignable('aprobado')).toBe('reparacion');
-    expect(etapaAsignable('diagnosticado')).toBeNull();
-    expect(etapaAsignable('entregado')).toBeNull();
+  const abrir = (o: object, actor = actorDe('mecanico')) =>
+    renderizar(<OrdenDetallePagina />, { actor, ruta: '/ordenes/OT-0001', patron: '/ordenes/:codigo', rutas: { '/api/ordenes/OT-0001': o } });
+
+  it('muestra el vehículo por VIN, la garantía, los mensajes y el prediagnóstico', async () => {
+    abrir(orden());
+    expect(await screen.findByText('ABC123 · Mazda 3')).toBeInTheDocument();
+    expect(screen.getByText(/VIN 9BWZZZ377VT004251/)).toBeInTheDocument();
+    expect(screen.getByText('Garantía vigente')).toBeInTheDocument();
+    expect(screen.getByText('«Chilla al frenar»')).toBeInTheDocument();
+    expect(screen.getByText('Probable desgaste de pastillas')).toBeInTheDocument();
+    expect(screen.getByText(/Un mecánico de la sede debe tomarla/)).toBeInTheDocument();
   });
 
-  const montar = (rol: string, cambios: Record<string, unknown>, rutas: Record<string, unknown> = {}) =>
-    renderizar(<OrdenDetallePagina />, {
-      ruta: '/ordenes/OT-0001',
-      patron: '/ordenes/:codigo',
-      actor: actorDe(rol),
-      rutas: {
-        'GET /api/ordenes/OT-0001': orden(cambios),
-        '/api/mecanicos/disponibilidad': [{ id: 'm1', nombre: 'Mario Prueba', carga: 0, disponible: true, ordenes: [] }],
-        ...rutas,
-      },
-    });
-
-  it('la recepcionista asigna un mecánico a una orden recibida', async () => {
-    const { llamadas } = montar('recepcionista', {}, { 'POST /api/ordenes/OT-0001/asignaciones': orden({ estado: 'en_diagnostico' }) });
-    const selector = await screen.findByLabelText(/Asignar mecánico/);
-    await screen.findByRole('option', { name: /Mario Prueba — disponible/ });
-    await userEvent.selectOptions(selector, 'm1');
-    await userEvent.click(screen.getByRole('button', { name: 'Asignar' }));
-    expect(llamadas.find((l) => l.metodo === 'POST')?.cuerpo).toEqual({ mecanicoId: 'm1', etapa: 'diagnostico' });
-    expect(await screen.findAllByText('En diagnóstico')).not.toHaveLength(0);
-    // Limpia la elección y vuelve a pedir la disponibilidad.
-    expect(selector).toHaveValue('');
-    expect(llamadas.filter((l) => l.url === '/api/mecanicos/disponibilidad')).toHaveLength(2);
+  it('una orden por garantía muestra el motivo del reclamo', async () => {
+    abrir(orden({ por_garantia: true, motivo_reclamo: 'Falla del caliper a los 8 meses' }));
+    expect(await screen.findByText('Viene por garantía')).toBeInTheDocument();
+    expect(screen.getByText('Falla del caliper a los 8 meses')).toBeInTheDocument();
   });
 
-  it('con el diagnóstico listo ofrece aprobar con el costo', async () => {
-    montar('recepcionista', { estado: 'diagnosticado', diagnostico: { estado: 'finalizado', mecanico: 'Mario', tareas: 2, costo: { horas: 1, manoObra: 60000, servicios: 0, repuestos: 0, total: 60000 } } });
-    expect(await screen.findByRole('button', { name: 'El cliente aprobó' })).toBeInTheDocument();
+  it('el mecánico de la sede puede tomarla', async () => {
+    abrir(orden());
+    expect(await screen.findByRole('button', { name: 'Tomar y diagnosticar' })).toBeInTheDocument();
   });
 
-  it('cancelar pide el motivo antes de confirmar', async () => {
-    const { llamadas } = montar('recepcionista', { estado: 'en_reparacion' }, { 'POST /api/ordenes/OT-0001/cancelar': orden({ estado: 'cancelado' }) });
-    await userEvent.click(await screen.findByRole('button', { name: 'Cancelar reparación' }));
-    await userEvent.type(screen.getByLabelText('Motivo de la cancelación'), 'El cliente desistió');
-    await userEvent.click(screen.getByRole('button', { name: 'Confirmar cancelación' }));
-    expect(llamadas.find((l) => l.url.endsWith('/cancelar'))?.cuerpo).toEqual({ motivo: 'El cliente desistió' });
+  it('un mecánico de otra sede no ve el botón tomar', async () => {
+    abrir(orden(), actorDe('mecanico', 'id-otro', 2));
+    await screen.findByText('ABC123 · Mazda 3');
+    expect(screen.queryByRole('button', { name: /Tomar/ })).not.toBeInTheDocument();
   });
 
-  it('el mecánico ve la orden sin acciones de recepción', async () => {
-    montar('mecanico', { estado: 'en_diagnostico' });
-    expect(await screen.findByText('Línea de tiempo')).toBeInTheDocument();
-    expect(screen.queryByText('Acciones')).not.toBeInTheDocument();
-  });
-});
-
-describe('inventario', () => {
-  it('marca los ítems en alerta y el mecánico no puede crear', async () => {
-    renderizar(<Inventario />, { actor: actorDe('mecanico'), rutas: { '/api/inventario': items, '/api/categorias': [] } });
-    const fila = (await screen.findByText('Batería')).closest('tr')!;
-    expect(within(fila).getByText('Alerta')).toHaveAttribute('data-tono', 'alerta');
-    expect(screen.getByText('1 ítem en alerta')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Nuevo ítem' })).not.toBeInTheDocument();
-  });
-
-  it('la recepcionista registra una entrada de mercancía', async () => {
-    const { llamadas } = renderizar(<Inventario />, {
-      actor: actorDe('recepcionista'),
-      rutas: { 'GET /api/inventario': items, '/api/categorias': [], 'POST /api/inventario/1/movimientos': items[0] },
-    });
-    await userEvent.click(await screen.findByText('Batería'));
-    await userEvent.type(screen.getByLabelText('Cantidad'), '5');
-    await userEvent.type(screen.getByLabelText('Nota'), 'Factura 120');
-    await userEvent.click(screen.getByRole('button', { name: 'Registrar movimiento' }));
-    expect(llamadas.find((l) => l.metodo === 'POST')?.cuerpo).toEqual({ tipo: 'entrada', cantidad: 5, nota: 'Factura 120' });
-  });
-
-  it('el filtro de alertas viaja en la consulta', async () => {
-    const { llamadas } = renderizar(<Inventario />, { ruta: '/inventario?alertas=1', actor: actorDe('recepcionista'), rutas: { '/api/inventario': [items[0]], '/api/categorias': [] } });
-    await screen.findByText('Batería');
-    expect(llamadas.some((l) => l.url === '/api/inventario?alertas=1')).toBe(true);
+  it('una orden remitida dice desde qué sede y con qué nota', async () => {
+    abrir(orden({ estado: 'remitida', sede: sedeFrenos(), remitida_desde: { codigo: 'PL-CENTRO', nombre: 'Pulgas Locas Centro', nota: 'Ruido en la rueda delantera' } }), actorDe('mecanico', 'id-m', 2));
+    expect(await screen.findByText('Remitida desde Pulgas Locas Centro')).toBeInTheDocument();
+    expect(screen.getByText('Ruido en la rueda delantera')).toBeInTheDocument();
   });
 });
 
 describe('reparación', () => {
-  const rep = {
-    orden: 'OT-0001',
-    estadoOrden: 'en_reparacion',
-    estado: 'en_curso',
-    iniciadaEn: '2026-10-22T13:00:00Z',
-    terminadaEn: null,
-    tarifaHora: 60000,
-    tareas: [{ id: 7, posicion: 1, descripcion: 'Cambiar aceite', horasEstimadas: 1, valorServicio: 30000, completada: false }],
-    horas: [],
-    partes: [],
-    estimado: { horas: 1, manoObra: 60000, servicios: 30000, repuestos: 0, total: 90000 },
-    real: { horas: 0, manoObra: 0, servicios: 0, repuestos: 0, total: 0 },
-    diferencia: -90000,
-  };
-  const montar = (asignado: boolean, rutas: Record<string, unknown> = {}) =>
+  const asignado = orden({ estado: 'en_reparacion', asignaciones: [{ id: 1, etapa: 'reparacion', mecanico_id: 'id-mecanico', mecanico: 'Ana Prueba' }] });
+  const abrir = (rep: object, o: object = asignado, actor = actorDe('mecanico'), extra: Record<string, unknown> = {}) =>
     renderizar(<ReparacionPagina />, {
+      actor,
       ruta: '/ordenes/OT-0001/reparacion',
       patron: '/ordenes/:codigo/reparacion',
-      actor: actorDe('mecanico'),
       rutas: {
-        'GET /api/ordenes/OT-0001/reparacion': rep,
-        '/api/ordenes/OT-0001': orden({ estado: 'en_reparacion', asignaciones: asignado ? [{ id: 2, etapa: 'reparacion', mecanicoId: 'id-mecanico', mecanico: 'Mario' }] : [] }),
-        '/api/inventario': items,
-        ...rutas,
+        '/api/ordenes/OT-0001/reparacion': rep,
+        '/api/ordenes/OT-0001': o,
+        '/api/codigos-repuesto': [{ codigo: 'PAS-DEL-CER', descripcion: 'Pastillas delanteras cerámicas', sistema: 'frenos' }],
+        ...extra,
       },
     });
 
-  it('el mecánico asignado registra horas; sin horas no puede terminar', async () => {
-    const { llamadas } = montar(true, { 'POST /api/ordenes/OT-0001/reparacion/horas': { ...rep, horas: [{ id: 1, mecanico: 'Mario', mecanicoId: 'id-mecanico', tareaId: null, inicio: '2026-10-22T13:00:00Z', fin: '2026-10-22T15:00:00Z', horas: 2, nota: '' }] } });
-    expect(await screen.findByRole('button', { name: 'Terminar reparación' })).toBeDisabled();
-    await userEvent.click(screen.getByRole('button', { name: 'Registrar horas' }));
-    const post = llamadas.find((l) => l.url.endsWith('/horas'));
-    expect(post?.cuerpo).toMatchObject({ inicio: expect.stringMatching(/Z$/), fin: expect.stringMatching(/Z$/), nota: '' });
-    expect(await screen.findByRole('button', { name: 'Terminar reparación' })).toBeEnabled();
+  it('muestra la orden de compra de facturación y la mano de obra cotizada', async () => {
+    abrir(reparacion());
+    expect(await screen.findByText('Repuestos El Gato')).toBeInTheDocument();
+    expect(screen.getAllByText('PAS-DEL-CER').length).toBeGreaterThan(0);
+    expect(screen.getByText(/cotizada/)).toHaveTextContent('90.000');
   });
 
-  it('marcar un paso hecho llama a la API con el id del paso', async () => {
-    const { llamadas } = montar(true, { 'PATCH /api/ordenes/OT-0001/reparacion/tareas/7': { ...rep, tareas: [{ ...rep.tareas[0], completada: true }] } });
-    await userEvent.click(await screen.findByRole('checkbox', { name: 'Paso 1 hecho' }));
-    expect(llamadas.find((l) => l.metodo === 'PATCH')?.cuerpo).toEqual({ completada: true });
+  it('sin horas ni servicios hechos no se puede terminar', async () => {
+    abrir(reparacion());
+    expect(await screen.findByRole('button', { name: 'Terminar reparación' })).toBeDisabled();
+    expect(screen.getByText(/registre las horas y marque los servicios/)).toBeInTheDocument();
+  });
+
+  it('con horas y un servicio hecho termina y queda pendiente de facturación', async () => {
+    const lista = reparacion({
+      servicios: [{ ...reparacion().servicios[0], completada: true }],
+      horas: [{ id: 1, mecanico: 'Ana Prueba', mecanico_id: 'id-mecanico', tarea_id: 11, inicio: '2026-10-23T13:00:00Z', fin: '2026-10-23T14:30:00Z', horas: 1.5, nota: '' }],
+      control: { horas_estandar: 1.5, horas_reales: 1.5, eficiencia: 1 },
+    });
+    const { llamadas } = abrir(lista, asignado, actorDe('mecanico'), {
+      'POST /api/ordenes/OT-0001/reparacion/terminar': { ...lista, estado: 'terminada', estado_orden: 'pendiente_facturacion' },
+    });
+    await userEvent.click(await screen.findByRole('button', { name: 'Terminar reparación' }));
+    expect(await screen.findByText(/facturación envía el PSE/)).toBeInTheDocument();
+    expect(llamadas.some((l) => l.metodo === 'POST' && l.url.endsWith('/terminar'))).toBe(true);
+  });
+
+  it('marcar un servicio hecho llama a la API con el id de la tarea', async () => {
+    const { llamadas } = abrir(reparacion(), asignado, actorDe('mecanico'), {
+      'PATCH /api/ordenes/OT-0001/reparacion/tareas/11': reparacion({ servicios: [{ ...reparacion().servicios[0], completada: true }] }),
+    });
+    await userEvent.click(await screen.findByRole('checkbox', { name: 'Cambio de pastillas delanteras hecho' }));
+    await waitFor(() => expect(llamadas.find((l) => l.metodo === 'PATCH')?.cuerpo).toEqual({ completada: true }));
+  });
+
+  it('una parte de la compra se registra como usada con su código y la compra', async () => {
+    const { llamadas } = abrir(reparacion(), asignado, actorDe('mecanico'), {
+      'POST /api/ordenes/OT-0001/reparacion/partes': reparacion(),
+    });
+    await userEvent.click(await screen.findByRole('button', { name: 'Usada' }));
+    expect(screen.getByLabelText('Código universal')).toHaveValue('PAS-DEL-CER');
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar parte usada' }));
+    await waitFor(() =>
+      expect(llamadas.find((l) => l.metodo === 'POST' && l.url.endsWith('/partes'))?.cuerpo).toEqual({
+        codigoRepuesto: 'PAS-DEL-CER',
+        descripcion: 'Pastillas delanteras cerámicas',
+        cantidad: 1,
+        compraId: 5,
+        nota: '',
+      }),
+    );
+  });
+
+  it('una parte escrita a mano se registra sin compra', async () => {
+    const { llamadas } = abrir(reparacion({ orden_compra: [] }), asignado, actorDe('mecanico'), {
+      'POST /api/ordenes/OT-0001/reparacion/partes': reparacion(),
+    });
+    expect(await screen.findByText('Sin repuestos que comprar: solo mano de obra')).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Código universal'), 'pas-del-cer');
+    expect(screen.getByLabelText('Descripción')).toHaveValue('Pastillas delanteras cerámicas');
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar parte usada' }));
+    await waitFor(() => expect(llamadas.find((l) => l.url.endsWith('/partes'))?.cuerpo).not.toHaveProperty('compraId'));
   });
 
   it('un mecánico no asignado a la reparación solo la consulta', async () => {
-    montar(false);
-    expect(await screen.findByRole('checkbox', { name: 'Paso 1 hecho' })).toBeDisabled();
+    abrir(reparacion(), orden({ estado: 'en_reparacion', asignaciones: [{ id: 1, etapa: 'reparacion', mecanico_id: 'otro', mecanico: 'Luis' }] }));
+    expect(await screen.findByText('Repuestos El Gato')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Terminar reparación' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Registrar horas' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Cambio de pastillas delanteras hecho' })).toBeDisabled();
+  });
+});
+
+describe('usuarios (administrador)', () => {
+  const usuarios = [
+    { id: 'u1', nombre: 'Mario', apellido: 'Gómez', documento: '10101', telefono: '3001234567', usuario: 'mario', rol: 'mecanico', taller: { id: 1, codigo: 'PL-CENTRO', nombre: 'Pulgas Locas Centro' }, activo: true },
+    { id: 'u2', nombre: 'Agente', apellido: 'Concesionario', documento: '20202', telefono: '3007654321', usuario: 'agente-concesionario', rol: 'agente', taller: null, activo: true },
+  ];
+  const abrir = (extra: Record<string, unknown> = {}) =>
+    renderizar(<Usuarios />, { actor: actorDe('administrador'), rutas: { '/api/usuarios': usuarios, '/api/talleres': [sede(), sedeFrenos()], ...extra } });
+
+  it('la sede solo viaja para el mecánico', () => {
+    expect(cuerpoUsuario({ usuario: 'a', rol: 'mecanico', tallerId: '2' })).toEqual({ usuario: 'a', rol: 'mecanico', tallerId: 2 });
+    expect(cuerpoUsuario({ usuario: 'a', rol: 'agente', tallerId: '2' })).toEqual({ usuario: 'a', rol: 'agente' });
+  });
+
+  it('muestra la sede del mecánico; los demás roles ven todas', async () => {
+    abrir();
+    expect(await screen.findByLabelText('Sede de mario')).toHaveValue('1');
+    expect(screen.getByText('Todas')).toBeInTheDocument();
+  });
+
+  it('los roles son los tres fijos, sin pedirlos a la API', async () => {
+    const { llamadas } = abrir();
+    const select = await screen.findByLabelText('Rol de mario');
+    expect([...select.querySelectorAll('option')].map((o) => o.value)).toEqual(['administrador', 'mecanico', 'agente']);
+    expect(llamadas.some((l) => l.url === '/api/roles')).toBe(false);
+  });
+
+  it('crear un mecánico exige elegir la sede y la envía', async () => {
+    const { llamadas } = abrir({ 'POST /api/usuarios': { id: 'u3' } });
+    await userEvent.click(await screen.findByRole('button', { name: 'Nuevo usuario' }));
+    await userEvent.type(screen.getByLabelText('Nombre'), 'Luis');
+    await userEvent.type(screen.getByLabelText('Apellido'), 'Pérez');
+    await userEvent.type(screen.getByLabelText('Documento'), '30303');
+    await userEvent.type(screen.getByLabelText('Teléfono'), '3000000000');
+    await userEvent.type(screen.getByLabelText('Usuario'), 'luis');
+    await userEvent.type(screen.getByLabelText(/^Clave/), 'clave-segura-1');
+    await userEvent.selectOptions(screen.getByLabelText('Sede'), '2');
+    await userEvent.click(screen.getByRole('button', { name: 'Crear usuario' }));
+    await waitFor(() => expect(llamadas.find((l) => l.metodo === 'POST')?.cuerpo).toMatchObject({ usuario: 'luis', rol: 'mecanico', tallerId: 2 }));
+  });
+
+  it('un agente no lleva sede', async () => {
+    abrir();
+    await userEvent.click(await screen.findByRole('button', { name: 'Nuevo usuario' }));
+    await userEvent.selectOptions(screen.getByLabelText('Rol'), 'agente');
+    expect(screen.queryByLabelText('Sede')).not.toBeInTheDocument();
+  });
+
+  it('cambiar la sede de un mecánico envía el tallerId', async () => {
+    const { llamadas } = abrir({ 'PATCH /api/usuarios/u1': { ...usuarios[0] } });
+    await userEvent.selectOptions(await screen.findByLabelText('Sede de mario'), '2');
+    await waitFor(() => expect(llamadas.find((l) => l.metodo === 'PATCH')?.cuerpo).toEqual({ tallerId: 2 }));
+  });
+
+  it('pasar un agente a mecánico le propone la primera sede', async () => {
+    const { llamadas } = abrir({ 'PATCH /api/usuarios/u2': { ...usuarios[1] } });
+    await userEvent.selectOptions(await screen.findByLabelText('Rol de agente-concesionario'), 'mecanico');
+    await waitFor(() => expect(llamadas.find((l) => l.metodo === 'PATCH')?.cuerpo).toEqual({ rol: 'mecanico', tallerId: 1 }));
   });
 });

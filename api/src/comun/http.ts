@@ -24,6 +24,19 @@ export async function leerCuerpo<T>(req: Request, esquema: ZodType<T>): Promise<
   return validar(esquema, datos);
 }
 
+// Para acciones cuyo cuerpo es opcional (por ejemplo, tomar una orden): sin cuerpo se
+// valida un objeto vacío.
+export async function leerCuerpoOpcional<T>(req: Request, esquema: ZodType<T>): Promise<T> {
+  const texto = await req.text();
+  if (!texto.trim()) return validar(esquema, {});
+  try {
+    return validar(esquema, JSON.parse(texto));
+  } catch (error) {
+    if (error instanceof SyntaxError) throw invalido('El cuerpo de la petición debe ser JSON válido');
+    throw error;
+  }
+}
+
 // Un id de la ruta (/api/clientes/7) como entero positivo.
 export function entero(valor: string | null | undefined, campo = 'El id'): number {
   const numero = Number(valor);

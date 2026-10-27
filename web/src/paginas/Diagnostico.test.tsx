@@ -1,166 +1,195 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { Diagnostico, Item } from '../api/tipos';
-import { actorDe, orden, renderizar } from '../pruebas/utilidades';
-import { aCuerpo, DiagnosticoPagina, EditorDiagnostico } from './Diagnostico';
+import type { CodigoRepuesto, Diagnostico, Sede, Servicio, ServicioDiagnostico } from '../api/tipos';
+import { actorDe, catalogo as catalogoPrueba, diagnostico, orden, renderizar, sede, sedeFrenos, servicioDiagnostico } from '../pruebas/utilidades';
+import { aCuerpo, aFormulario, DiagnosticoPagina, EditorDiagnostico } from './Diagnostico';
 
-const items: Item[] = [
-  { id: 1, codigo: 'ACE-5W30', nombre: 'Aceite 5W-30', precio: 38000, cantidad: 24, nivelAlerta: 8, categoria: 'Lubricantes', categoriaId: 1, activo: true, enAlerta: false },
-  { id: 2, codigo: 'FIL-ACE-01', nombre: 'Filtro de aceite', precio: 25000, cantidad: 0, nivelAlerta: 4, categoria: 'Filtros', categoriaId: 2, activo: true, enAlerta: true },
-];
+const catalogo = catalogoPrueba as Servicio[];
+const codigos: CodigoRepuesto[] = [{ codigo: 'PAS-DEL-CER', descripcion: 'Pastillas delanteras cerámicas', sistema: 'frenos' }];
+const diag = (cambios: Record<string, unknown> = {}) => diagnostico(cambios) as Diagnostico;
+const servicio = (cambios: Record<string, unknown> = {}) => servicioDiagnostico(cambios) as ServicioDiagnostico;
 
-const borrador = (cambios: Partial<Diagnostico> = {}): Diagnostico => ({
-  orden: 'OT-0001',
-  estadoOrden: 'en_diagnostico',
-  estado: 'borrador',
-  mecanico: 'Mario Prueba',
-  observaciones: '',
-  tarifaHora: 60000,
-  finalizadoEn: null,
-  tareas: [],
-  costo: { horas: 0, manoObra: 0, servicios: 0, repuestos: 0, total: 0 },
-  ...cambios,
-});
-
-const total = () => screen.getByTestId('total').textContent?.replace(/\s/g, ' ');
+function editor(props: Partial<Parameters<typeof EditorDiagnostico>[0]> = {}) {
+  const funciones = {
+    alGuardar: vi.fn(async () => diag({ servicios: [servicio()] })),
+    alFinalizar: vi.fn(async () => undefined),
+    alRemitir: vi.fn(async () => undefined),
+    alSubir: vi.fn(async () => ({ id: 7, nombre: 'foto.jpg', tipo: 'jpg', url: '/api/evidencias/7' })),
+  };
+  render(<EditorDiagnostico inicial={diag()} catalogo={catalogo} codigos={codigos} sedesRemision={[]} {...funciones} {...props} />);
+  return { ...funciones, ...props };
+}
 
 describe('editor del diagnóstico', () => {
-  it('empieza con un paso de 1 hora y calcula la mano de obra', () => {
-    render(<EditorDiagnostico inicial={borrador()} items={items} tarifaEditable={false} alGuardar={vi.fn()} alFinalizar={vi.fn()} />);
-    expect(screen.getAllByText(/^Paso \d$/)).toHaveLength(1);
-    expect(total()).toMatch(/60\.000/);
+  it('empieza con un servicio vacío y la mano de obra en 0', () => {
+    editor();
+    expect(screen.getAllByLabelText('Servicio (SKU)')).toHaveLength(1);
+    expect(screen.getByTestId('total')).toHaveTextContent(/\$\s?0/);
   });
 
-  it('el costo se actualiza en vivo con horas, servicio y repuestos del inventario', async () => {
-    render(<EditorDiagnostico inicial={borrador()} items={items} tarifaEditable={false} alGuardar={vi.fn()} alFinalizar={vi.fn()} />);
-    const valor = screen.getByLabelText('Valor del servicio');
-    await userEvent.clear(valor);
-    await userEvent.type(valor, '20000');
-    await userEvent.click(screen.getByRole('button', { name: '+ Del inventario' }));
-    const cantidad = screen.getByLabelText('Cantidad');
-    await userEvent.clear(cantidad);
-    await userEvent.type(cantidad, '4');
-    // 1 h × 60.000 + 20.000 + 4 × 38.000 = 232.000
-    expect(total()).toMatch(/232\.000/);
+  it('la mano de obra es el precio fijo de cada SKU, en vivo', async () => {
+    editor();
+    await userEvent.selectOptions(screen.getByLabelText('Servicio (SKU)'), 'FRE-PAST-DEL');
+    expect(screen.getByTestId('total')).toHaveTextContent('90.000');
+    await userEvent.click(screen.getByRole('button', { name: '+ Agregar servicio' }));
+    await userEvent.selectOptions(screen.getAllByLabelText('Servicio (SKU)')[1], 'MOT-AFINACION');
+    expect(screen.getByTestId('total')).toHaveTextContent('270.000');
+    await userEvent.click(screen.getByRole('button', { name: 'Quitar servicio 1' }));
+    expect(screen.getByTestId('total')).toHaveTextContent('180.000');
   });
 
-  it('avisa cuando una pieza del inventario no alcanza', async () => {
-    render(<EditorDiagnostico inicial={borrador()} items={items} tarifaEditable={false} alGuardar={vi.fn()} alFinalizar={vi.fn()} />);
-    await userEvent.click(screen.getByRole('button', { name: '+ Del inventario' }));
-    await userEvent.selectOptions(screen.getByLabelText('Ítem del inventario'), '2');
-    expect(screen.getByText('No alcanza: se pedirá')).toBeInTheDocument();
+  it('la revisión general ya hecha se suma y no se puede editar', () => {
+    editor({ inicial: diag({ servicios: [servicio({ id: 1, sku: 'REV-GENERAL', servicio: 'Revisión general', precio: 60000, fija: true, completada: true })] }) });
+    expect(screen.getByText('Revisión general')).toBeInTheDocument();
+    expect(screen.getByText(/Hecha/)).toHaveTextContent('60.000');
+    expect(screen.getAllByLabelText('Servicio (SKU)')).toHaveLength(1);
+    expect(screen.getByTestId('total')).toHaveTextContent('60.000');
   });
 
-  it('agrega, reordena y quita pasos', async () => {
-    render(<EditorDiagnostico inicial={borrador()} items={items} tarifaEditable={false} alGuardar={vi.fn()} alFinalizar={vi.fn()} />);
-    await userEvent.type(screen.getByLabelText('Qué hacer'), 'Primero');
-    await userEvent.click(screen.getByRole('button', { name: '+ Agregar paso' }));
-    const pasos = () => within(screen.getByRole('list', { name: 'Paso a paso' })).getAllByRole('listitem');
-    expect(pasos()).toHaveLength(2);
-    await userEvent.type(within(pasos()[1]).getByLabelText('Qué hacer'), 'Segundo');
-    await userEvent.click(screen.getByRole('button', { name: 'Subir paso 2' }));
-    expect(within(pasos()[0]).getByLabelText('Qué hacer')).toHaveValue('Segundo');
-    await userEvent.click(screen.getByRole('button', { name: 'Quitar paso 1' }));
-    expect(pasos()).toHaveLength(1);
-    expect(within(pasos()[0]).getByLabelText('Qué hacer')).toHaveValue('Primero');
+  it('la causa sugiere el dictamen de garantía y el mecánico lo puede cambiar', async () => {
+    editor();
+    const siAplica = () => screen.getByRole('radio', { name: 'Sí aplica' });
+    await userEvent.selectOptions(screen.getByLabelText('Causa de la falla'), 'defecto_fabrica');
+    expect(siAplica()).toBeChecked();
+    await userEvent.selectOptions(screen.getByLabelText('Causa de la falla'), 'manipulacion_cliente');
+    expect(screen.getByRole('radio', { name: 'No aplica' })).toBeChecked();
+    await userEvent.click(siAplica());
+    expect(screen.getByText(/Cambió el dictamen sugerido/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Motivo del dictamen')).toBeInTheDocument();
   });
 
-  it('el mecánico no cambia la tarifa; el personal sí', () => {
-    const { unmount } = render(<EditorDiagnostico inicial={borrador()} items={items} tarifaEditable={false} alGuardar={vi.fn()} alFinalizar={vi.fn()} />);
-    expect(screen.getByLabelText('Tarifa por hora')).toBeDisabled();
-    unmount();
-    render(<EditorDiagnostico inicial={borrador()} items={items} tarifaEditable alGuardar={vi.fn()} alFinalizar={vi.fn()} />);
-    expect(screen.getByLabelText('Tarifa por hora')).toBeEnabled();
+  it('sin id todavía no se pueden adjuntar evidencias', async () => {
+    editor();
+    await userEvent.selectOptions(screen.getByLabelText('Causa de la falla'), 'defecto_fabrica');
+    expect(screen.getByRole('button', { name: 'Adjuntar foto o PDF' })).toBeDisabled();
+    expect(screen.getByText('Guarde el borrador para adjuntar evidencias')).toBeInTheDocument();
   });
 
-  it('guardar envía el paso a paso sin la tarifa si no es editable', async () => {
-    const alGuardar = vi.fn(async () => {});
-    render(<EditorDiagnostico inicial={borrador()} items={items} tarifaEditable={false} alGuardar={alGuardar} alFinalizar={vi.fn()} />);
-    await userEvent.type(screen.getByLabelText('Qué hacer'), 'Cambiar pastillas');
-    await userEvent.click(screen.getByRole('button', { name: '+ Pieza que no hay' }));
-    await userEvent.type(screen.getByLabelText('Pieza fuera de inventario'), 'Sensor');
+  it('adjunta una evidencia al servicio guardado', async () => {
+    const f = editor({ inicial: diag({ servicios: [servicio({ causa: 'defecto_fabrica', garantia: { aplica: true, motivo: 'Fisura de fábrica', valida: null, respuesta: null, pagador: 'cliente' } })] }) });
+    expect(screen.getByText('Si aplica garantía, la evidencia es obligatoria')).toBeInTheDocument();
+    const archivo = new File(['x'], 'foto.jpg', { type: 'image/jpeg' });
+    await userEvent.upload(screen.getByLabelText('Adjuntar foto o PDF'), archivo);
+    await waitFor(() => expect(f.alSubir).toHaveBeenCalledWith(11, archivo));
+    expect(await screen.findByRole('button', { name: /foto\.jpg/ })).toBeInTheDocument();
+  });
+
+  it('una orden por garantía pide evidencias de la orden', async () => {
+    const f = editor({ inicial: diag({ por_garantia: true }) });
+    await userEvent.upload(screen.getByLabelText('Adjuntar evidencia de la orden'), new File(['x'], 'reclamo.pdf', { type: 'application/pdf' }));
+    await waitFor(() => expect(f.alSubir).toHaveBeenCalledWith(null, expect.any(File)));
+  });
+
+  it('los repuestos van con código universal y cantidad, sin precio', async () => {
+    const f = editor();
+    await userEvent.selectOptions(screen.getByLabelText('Servicio (SKU)'), 'FRE-PAST-DEL');
+    await userEvent.click(screen.getByRole('button', { name: '+ Repuesto' }));
+    await userEvent.type(screen.getByLabelText('Código universal'), 'pas-del-cer');
+    expect(screen.getByLabelText('Descripción')).toHaveValue('Pastillas delanteras cerámicas');
+    expect(screen.getByText('1 por cotizar')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Guardar borrador' }));
-    expect(alGuardar).toHaveBeenCalledWith({
-      observaciones: '',
-      tareas: [
-        {
-          descripcion: 'Cambiar pastillas',
-          horasEstimadas: 1,
-          valorServicio: 0,
-          requierePiezas: true,
-          repuestos: [{ descripcion: 'Sensor', cantidad: 1, precioUnitario: 0 }],
-        },
-      ],
-    });
+    await waitFor(() => expect(f.alGuardar).toHaveBeenCalled());
+    expect(f.alGuardar).toHaveBeenCalledWith(
+      {
+        observaciones: '',
+        tareas: [
+          { sku: 'FRE-PAST-DEL', descripcion: '', causa: null, garantiaAplica: false, garantiaMotivo: '', repuestos: [{ codigoRepuesto: 'PAS-DEL-CER', descripcion: 'Pastillas delanteras cerámicas', cantidad: 1 }] },
+        ],
+      },
+    );
     expect(await screen.findByText('Borrador guardado.')).toBeInTheDocument();
   });
 
   it('finalizar guarda primero y luego finaliza; un error se muestra', async () => {
-    const orden: string[] = [];
-    const alGuardar = vi.fn(async () => void orden.push('guardar'));
-    const alFinalizar = vi.fn(async () => {
-      orden.push('finalizar');
-      throw new Error('El diagnóstico necesita al menos un paso');
-    });
-    render(<EditorDiagnostico inicial={borrador()} items={items} tarifaEditable={false} alGuardar={alGuardar} alFinalizar={alFinalizar} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Guardar y finalizar diagnóstico' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('al menos un paso');
-    expect(orden).toEqual(['guardar', 'finalizar']);
+    const f = editor({ alFinalizar: vi.fn(async () => Promise.reject(new Error('Falta la evidencia del servicio 1'))) });
+    await userEvent.click(screen.getByRole('button', { name: 'Finalizar y enviar a garantía' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Falta la evidencia del servicio 1');
+    expect(f.alGuardar).toHaveBeenCalled();
+    expect(f.alFinalizar).toHaveBeenCalled();
   });
 
-  it('aCuerpo manda solo itemId y cantidad para ítems del inventario', () => {
-    expect(
-      aCuerpo([
-        {
-          clave: 'a',
-          descripcion: ' Cambio ',
-          horasEstimadas: '1.5',
-          valorServicio: '',
-          repuestos: [{ clave: 'b', itemId: 3, descripcion: 'x', cantidad: '2', precioUnitario: '999' }],
-        },
-      ]),
-    ).toEqual([{ descripcion: 'Cambio', horasEstimadas: 1.5, valorServicio: 0, requierePiezas: true, repuestos: [{ itemId: 3, cantidad: 2 }] }]);
+  it('remitir exige sede y una nota', async () => {
+    const f = editor({ sedesRemision: [sedeFrenos() as Sede] });
+    await userEvent.click(screen.getByRole('button', { name: 'Remitir a sede especializada' }));
+    const remitir = screen.getByRole('button', { name: 'Remitir' });
+    expect(remitir).toBeDisabled();
+    await userEvent.selectOptions(screen.getByLabelText('Sede'), '2');
+    await userEvent.type(screen.getByLabelText('Nota para el especialista'), 'Ruido en la rueda delantera');
+    await userEvent.click(remitir);
+    await waitFor(() => expect(f.alRemitir).toHaveBeenCalledWith(2, 'Ruido en la rueda delantera'));
+  });
+});
+
+describe('conversión del formulario', () => {
+  it('aFormulario deja fuera las tareas fijas', () => {
+    const f = aFormulario([servicio({ id: 1, fija: true }), servicio({ id: 2, causa: 'desgaste_normal', repuestos: [{ id: 3, codigo_repuesto: 'X-1', descripcion: 'X', cantidad: 2 }] })]);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ id: 2, causa: 'desgaste_normal', repuestos: [{ codigo: 'X-1', cantidad: '2' }] });
+  });
+
+  it('aCuerpo: sin causa no hay dictamen, y omite repuestos sin código', () => {
+    const cuerpo = aCuerpo(' ok ', [
+      { clave: 'a', id: 4, sku: 'FRE-PAST-DEL', descripcion: ' cambio ', causa: '', aplica: true, motivo: ' ', repuestos: [{ clave: 'r', codigo: '', descripcion: '', cantidad: '1' }], evidencias: [] },
+    ]);
+    expect(cuerpo.tareas[0]).toEqual({ id: 4, sku: 'FRE-PAST-DEL', descripcion: 'cambio', causa: null, garantiaAplica: false, garantiaMotivo: '', repuestos: [] });
   });
 });
 
 describe('página del diagnóstico', () => {
-  const rutas = (diag: Diagnostico, asignado: boolean) => ({
-    '/api/ordenes/OT-0001/diagnostico': diag,
-    '/api/ordenes/OT-0001': orden({
-      estado: diag.estadoOrden,
-      asignaciones: asignado ? [{ id: 1, etapa: 'diagnostico', mecanicoId: 'id-mecanico', mecanico: 'Mario' }] : [],
-    }),
-    '/api/inventario': items,
-  });
-  const opciones = (rol: string, diag: Diagnostico, asignado: boolean) => ({
-    ruta: '/ordenes/OT-0001/diagnostico',
-    patron: '/ordenes/:codigo/diagnostico',
-    actor: actorDe(rol),
-    rutas: rutas(diag, asignado),
-  });
-
-  it('el mecánico asignado edita el borrador', async () => {
-    renderizar(<DiagnosticoPagina />, opciones('mecanico', borrador(), true));
-    expect(await screen.findByRole('button', { name: 'Guardar borrador' })).toBeInTheDocument();
-  });
-
-  it('la recepcionista solo lo lee, con el costo para el cliente', async () => {
-    const d = borrador({
-      estadoOrden: 'diagnosticado',
-      estado: 'finalizado',
-      tareas: [{ id: 1, posicion: 1, descripcion: 'Cambiar filtro', horasEstimadas: 1, valorServicio: 0, requierePiezas: true, repuestos: [{ id: 1, itemId: 2, codigo: 'FIL-ACE-01', descripcion: 'Filtro de aceite', cantidad: 1, precioUnitario: 25000, disponible: false }] }],
-      costo: { horas: 1, manoObra: 60000, servicios: 0, repuestos: 25000, total: 85000 },
+  const asignado = orden({ estado: 'en_diagnostico', asignaciones: [{ id: 1, etapa: 'diagnostico', mecanico_id: 'id-mecanico', mecanico: 'Ana Prueba' }] });
+  const abrir = (d: object, o: object = asignado, actor = actorDe('mecanico')) =>
+    renderizar(<DiagnosticoPagina />, {
+      actor,
+      ruta: '/ordenes/OT-0001/diagnostico',
+      patron: '/ordenes/:codigo/diagnostico',
+      rutas: {
+        '/api/ordenes/OT-0001/diagnostico': d,
+        '/api/ordenes/OT-0001': o,
+        '/api/servicios': catalogo,
+        '/api/codigos-repuesto': codigos,
+        '/api/talleres': [sede(), sedeFrenos()],
+      },
     });
-    renderizar(<DiagnosticoPagina />, opciones('recepcionista', d, false));
-    expect(await screen.findByText('Cambiar filtro')).toBeInTheDocument();
-    expect(screen.getByText('Pedir')).toBeInTheDocument();
+
+  it('el mecánico asignado edita el borrador y, en mantenimiento, puede remitir', async () => {
+    abrir(diagnostico());
+    expect(await screen.findByRole('button', { name: 'Guardar borrador' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remitir a sede especializada' })).toBeInTheDocument();
+  });
+
+  it('en una sede especializada no se ofrece remitir', async () => {
+    abrir(diagnostico(), { ...asignado, sede: sedeFrenos() }, actorDe('mecanico', 'id-mecanico', 2));
+    await screen.findByRole('button', { name: 'Guardar borrador' });
+    expect(screen.queryByRole('button', { name: 'Remitir a sede especializada' })).not.toBeInTheDocument();
+  });
+
+  it('finalizado muestra la respuesta del concesionario y quién paga', async () => {
+    abrir(
+      diagnostico({
+        estado: 'finalizado',
+        estado_orden: 'en_cotizacion',
+        servicios: [
+          servicioDiagnostico({
+            causa: 'manipulacion_cliente',
+            causa_nombre: 'Manipulación del cliente',
+            garantia: { aplica: false, motivo: 'Cables empalmados', valida: false, respuesta: 'Manipulación del cliente', pagador: 'cliente' },
+            evidencias: [{ id: 7, nombre: 'cables.jpg', tipo: 'jpg', url: '/api/evidencias/7' }],
+          }),
+        ],
+        total_mano_obra: 90000,
+      }),
+    );
+    const tarjeta = (await screen.findByText('Garantía no válida')).closest('div')!;
+    expect(within(tarjeta.parentElement!).getByText(/Cables empalmados/)).toBeInTheDocument();
+    expect(screen.getByText('Paga: Cliente')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /cables\.jpg/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Guardar borrador' })).not.toBeInTheDocument();
   });
 
   it('un mecánico no asignado a diagnóstico no puede editar', async () => {
-    renderizar(<DiagnosticoPagina />, opciones('mecanico', borrador(), false));
-    await waitFor(() => expect(screen.getByText('Diagnóstico')).toBeInTheDocument());
+    abrir(diagnostico(), orden({ estado: 'en_diagnostico', asignaciones: [{ id: 1, etapa: 'diagnostico', mecanico_id: 'otro', mecanico: 'Luis' }] }));
+    expect(await screen.findByText('Diagnóstico')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Guardar borrador' })).not.toBeInTheDocument();
   });
 });

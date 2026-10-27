@@ -1,6 +1,6 @@
 // Formas de las respuestas de la API (taller/api). Si cambia un service, se cambia aquí.
 
-export type Rol = 'administrador' | 'recepcionista' | 'mecanico' | 'concesionario' | (string & {});
+export type Rol = 'administrador' | 'mecanico' | 'agente' | (string & {});
 
 export interface Actor {
   id: string;
@@ -8,42 +8,75 @@ export interface Actor {
   apellido: string;
   usuario: string;
   rol: Rol;
+  tallerId: number | null;
 }
 
 export const ESTADOS = [
-  'recibido',
+  'agendada',
   'en_diagnostico',
-  'diagnosticado',
-  'aprobado',
+  'remitida',
+  'validando_garantia',
+  'en_cotizacion',
+  'aprobada',
+  'rechazada',
   'en_reparacion',
-  'terminado',
-  'entregado',
-  'cancelado',
+  'pendiente_facturacion',
+  'facturada',
+  'entregada',
+  'cancelada',
 ] as const;
 export type Estado = (typeof ESTADOS)[number];
 export type Etapa = 'diagnostico' | 'reparacion';
 
-export interface Vehiculo {
+export const ESPECIALIDADES = ['mantenimiento_general', 'frenos', 'suspension', 'motor', 'electrico', 'transmision'] as const;
+export type Especialidad = (typeof ESPECIALIDADES)[number];
+
+export const CAUSAS = ['defecto_fabrica', 'repuesto_defectuoso', 'mala_instalacion_taller', 'manipulacion_cliente', 'desgaste_normal'] as const;
+export type Causa = (typeof CAUSAS)[number];
+export type Pagador = 'cliente' | 'fabricante' | 'tienda' | 'taller';
+
+export interface Sede {
   id: number;
-  placa: string;
+  codigo: string;
+  nombre: string;
+  tipo: 'mantenimiento' | 'especializado';
+  especialidades: Especialidad[];
+  ubicacion: { ciudad: string; direccion: string; latitud: number | null; longitud: number | null };
+  telefono: string;
+  horario: { dias: number[]; apertura: string; cierre: string };
+  activo: boolean;
+}
+
+export interface Vehiculo {
+  vin: string;
   marca: string;
   modelo: string;
   anio: number;
-  color: string;
+  version: string;
+  carroceria: string;
+  puertas: number;
+  motor: string;
+  combustible: string;
+  transmision: string;
+  placa: string;
   kilometraje: number;
-  origen: 'taller' | 'concesionario';
-  referenciaExterna: string | null;
 }
 
-export interface Cliente {
-  id: number;
-  nombre: string;
-  apellido: string;
-  documento: string;
-  telefono: string;
-  correo: string | null;
-  direccion: string | null;
-  vehiculos?: Vehiculo[];
+export interface Cobertura {
+  vigente: boolean;
+  vence: string;
+  kmMaximo: number;
+  cubre: Especialidad[];
+  motivo?: string;
+}
+
+export interface Prediagnostico {
+  especialidad: Especialidad;
+  servicios: string[];
+  confianza: number;
+  ruta: 'especializada' | 'revision_general';
+  resumen: string;
+  fuente: 'modelo' | 'reglas';
 }
 
 export interface PasoHistorial {
@@ -53,120 +86,115 @@ export interface PasoHistorial {
   nota?: string;
 }
 
-export interface Costo {
-  horas: number;
-  manoObra: number;
-  servicios: number;
-  repuestos: number;
-  total: number;
-}
-
 export interface Orden {
   codigo: string;
   estado: Estado;
-  motivo: string;
-  kilometraje: number | null;
-  origen: 'taller' | 'concesionario';
-  motivoCancelacion: string | null;
+  siguiente_paso: { responsable: string; descripcion: string };
+  acciones_disponibles: string[];
+  sede: Sede;
+  remitida_desde: { codigo: string; nombre: string; nota: string | null } | null;
+  id_relacion: string;
+  cliente: { cedula: string; nombre: string; telefono: string };
   vehiculo: Vehiculo;
-  cliente: { id: number; nombre: string; documento: string; telefono: string };
-  asignaciones: { id: number; etapa: Etapa; mecanicoId: string; mecanico: string }[];
+  garantia: Cobertura;
+  fecha_cita: string | null;
+  kilometraje: number | null;
+  mensajes_cliente: { texto: string; fecha?: string }[];
+  sintomas: string;
+  prediagnostico: Prediagnostico | null;
+  por_garantia: boolean;
+  motivo_reclamo: string | null;
+  motivo_cancelacion: string | null;
+  asignaciones: { id: number; etapa: Etapa; mecanico_id: string; mecanico: string }[];
   historial: PasoHistorial[];
-  creadaPor?: string;
-  creadoEn: string;
-  actualizadoEn: string;
+  creado_en: string;
+  actualizado_en: string;
 }
 
 export interface OrdenDetalle extends Orden {
-  diagnostico: { estado: string; mecanico: string; tareas: number; costo: Costo } | null;
-  reparacion: { estado: string; iniciadaEn: string; terminadaEn: string | null; total: number | null } | null;
+  diagnostico: { estado: string; mecanico: string; servicios: number; total_mano_obra: number; repuestos: number } | null;
+  reparacion: { estado: string; iniciada_en: string; terminada_en: string | null; total_mano_obra: number | null } | null;
 }
 
-export interface Repuesto {
-  id?: number;
-  itemId: number | null;
-  codigo?: string | null;
-  descripcion: string;
-  cantidad: number;
-  precioUnitario: number;
-  disponible?: boolean;
+export interface Evidencia {
+  id: number;
+  nombre: string;
+  tipo: string;
+  url: string;
 }
 
-export interface Tarea {
-  id?: number;
-  posicion?: number;
+export interface ServicioDiagnostico {
+  id: number;
+  posicion: number;
+  sku: string;
+  servicio: string;
+  especialidad: Especialidad;
+  precio: number;
   descripcion: string;
-  horasEstimadas: number;
-  valorServicio: number;
-  requierePiezas: boolean;
-  completada?: boolean;
-  repuestos: Repuesto[];
+  causa: Causa | null;
+  causa_nombre: string | null;
+  garantia: { aplica: boolean; motivo: string; valida: boolean | null; respuesta: string | null; pagador: Pagador };
+  completada: boolean;
+  fija: boolean;
+  repuestos: { id: number; codigo_repuesto: string; descripcion: string; cantidad: number }[];
+  evidencias: Evidencia[];
 }
 
 export interface Diagnostico {
   orden: string;
-  estadoOrden: Estado;
+  estado_orden: Estado;
   estado: 'borrador' | 'finalizado' | 'cancelado';
   mecanico: string;
   observaciones: string;
-  tarifaHora: number;
-  finalizadoEn: string | null;
-  tareas: Tarea[];
-  costo: Costo;
+  por_garantia: boolean;
+  motivo_reclamo: string | null;
+  garantia_vehiculo: Cobertura;
+  servicios: ServicioDiagnostico[];
+  evidencias_orden: Evidencia[];
+  total_mano_obra: number;
+  repuestos_a_comprar: number;
+  finalizado_en: string | null;
+}
+
+export interface LineaCompra {
+  id: number;
+  codigo_repuesto: string;
+  descripcion: string;
+  cantidad: number;
+  tienda: string;
+  precio_unitario: number;
+  pagador: Pagador;
 }
 
 export interface Reparacion {
   orden: string;
-  estadoOrden: Estado;
+  estado_orden: Estado;
   estado: 'en_curso' | 'terminada' | 'cancelada';
-  iniciadaEn: string;
-  terminadaEn: string | null;
-  tarifaHora: number;
-  tareas: { id: number; posicion: number; descripcion: string; horasEstimadas: number; valorServicio: number; completada: boolean }[];
-  horas: { id: number; mecanico: string; mecanicoId: string; tareaId: number | null; inicio: string; fin: string; horas: number; nota: string }[];
-  partes: { id: number; itemId: number; codigo: string; descripcion: string; cantidad: number; precioUnitario: number; subtotal: number }[];
-  estimado: Costo;
-  real: Costo;
-  diferencia: number;
+  iniciada_en: string;
+  terminada_en: string | null;
+  servicios: { id: number; posicion: number; sku: string; servicio: string; descripcion: string; precio: number; pagador: Pagador; garantia_valida: boolean | null; completada: boolean; fija: boolean }[];
+  orden_compra: LineaCompra[];
+  horas: { id: number; mecanico: string; mecanico_id: string; tarea_id: number | null; inicio: string; fin: string; horas: number; nota: string }[];
+  partes_usadas: { id: number; codigo_repuesto: string; descripcion: string; cantidad: number; compra_id: number | null; tienda: string | null; nota: string }[];
+  control: { horas_estandar: number; horas_reales: number; eficiencia: number | null };
+  mano_obra_cotizada: number;
+  mano_obra_realizada: number;
 }
 
-export interface Item {
-  id: number;
-  codigo: string;
+export interface Servicio {
+  sku: string;
   nombre: string;
-  precio: number;
-  cantidad: number;
-  nivelAlerta: number;
-  categoria: string;
-  categoriaId: number;
+  especialidad: Especialidad;
+  precio_mano_obra: number;
+  horas_estandar: number;
+  descripcion: string;
   activo: boolean;
-  enAlerta: boolean;
 }
 
-export interface Categoria {
-  id: number;
-  nombre: string;
-}
-
-export interface Mecanico {
-  id: string;
-  nombre: string;
-  carga: number;
-  disponible: boolean;
-  ordenes: { codigo: string; estado: Estado; etapa: Etapa }[];
-}
-
-export interface Panel {
-  abiertas: number;
-  enDiagnostico: number;
-  porAprobar: number;
-  enReparacion: number;
-  listasParaEntregar: number;
-  itemsEnAlerta: number;
-  facturadoMes: number;
-  ordenesFacturadasMes: number;
-  ultimas: Orden[];
-  mecanicos: Mecanico[];
+export interface CodigoRepuesto {
+  codigo: string;
+  descripcion: string;
+  sistema: string;
 }
 
 export interface Usuario {
@@ -177,23 +205,6 @@ export interface Usuario {
   telefono: string;
   usuario: string;
   rol: Rol;
+  taller: { id: number; codigo: string; nombre: string } | null;
   activo: boolean;
-}
-
-export interface RolInfo {
-  id: number;
-  nombre: string;
-  descripcion: string;
-  usuarios: number;
-}
-
-export interface EstadoIntegraciones {
-  destinos: {
-    destino: string;
-    descripcion: string;
-    configurado: boolean;
-    herramientas: Record<string, string>;
-    eventos: Record<string, number>;
-  }[];
-  ultimos: { id: number; destino: string; herramienta: string; estado: string; intentos: number; ultimoError: string | null; creadoEn: string }[];
 }

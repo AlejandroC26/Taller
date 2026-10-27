@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { costoEstimado } from './costos';
-import { aEntradaLocal, cuenta, NOMBRE_ESTADO, nombreRol, pesos, tonoDe } from './formato';
-import { enlacesDe, inicioDe, puede } from './permisos';
+import { totalManoObra } from './costos';
+import { aEntradaLocal, cuenta, dictamenSugerido, NOMBRE_ESTADO, nombreRol, pesos, tonoDe } from './formato';
+import { enlacesDe, inicioDe, puede, ROLES } from './permisos';
 
 describe('formato', () => {
   it('muestra pesos colombianos sin centavos', () => {
@@ -9,31 +9,44 @@ describe('formato', () => {
     expect(pesos(null)).toMatch(/0/);
   });
 
-  it('el tono del estado: azul en progreso, violeta por aprobar, teal aprobado, menta listo', () => {
+  it('el tono del estado: azul trabajando, violeta esperando a otro sistema, menta hecho', () => {
     expect(tonoDe('en_diagnostico')).toBe('progreso');
     expect(tonoDe('en_reparacion')).toBe('progreso');
-    expect(tonoDe('diagnosticado')).toBe('revision');
-    expect(tonoDe('aprobado')).toBe('aprobado');
-    expect(tonoDe('terminado')).toBe('listo');
-    expect(tonoDe('entregado')).toBe('listo');
-    expect(tonoDe('cancelado')).toBe('neutro');
-    expect(tonoDe('recibido')).toBe('neutro');
+    expect(tonoDe('validando_garantia')).toBe('revision');
+    expect(tonoDe('en_cotizacion')).toBe('revision');
+    expect(tonoDe('pendiente_facturacion')).toBe('revision');
+    expect(tonoDe('aprobada')).toBe('aprobado');
+    expect(tonoDe('facturada')).toBe('listo');
+    expect(tonoDe('entregada')).toBe('listo');
+    expect(tonoDe('rechazada')).toBe('alerta');
+    expect(tonoDe('agendada')).toBe('neutro');
+    expect(tonoDe('cancelada')).toBe('neutro');
+  });
+
+  it('nombra los 12 estados en español', () => {
+    expect(Object.keys(NOMBRE_ESTADO)).toHaveLength(12);
+    expect(NOMBRE_ESTADO.validando_garantia).toMatch(/garantía/i);
+    expect(NOMBRE_ESTADO.en_reparacion).toBe('En reparación');
   });
 
   it('cuenta en singular o plural', () => {
     expect(cuenta(1, 'paso', 'pasos')).toBe('1 paso');
     expect(cuenta(0, 'paso', 'pasos')).toBe('0 pasos');
-    expect(cuenta(3, 'ítem', 'ítems')).toBe('3 ítems');
   });
 
   it('nombra los roles con tilde y deja intacto uno desconocido', () => {
     expect(nombreRol('mecanico')).toBe('Mecánico');
+    expect(nombreRol('agente')).toMatch(/Agente/);
     expect(nombreRol('otro')).toBe('otro');
   });
 
-  it('nombra los estados en español', () => {
-    expect(NOMBRE_ESTADO.diagnosticado).toBe('Por aprobar');
-    expect(NOMBRE_ESTADO.en_reparacion).toBe('En reparación');
+  it('el dictamen sugerido sale de la causa (igual que la API)', () => {
+    expect(dictamenSugerido('defecto_fabrica')).toBe(true);
+    expect(dictamenSugerido('repuesto_defectuoso')).toBe(true);
+    expect(dictamenSugerido('mala_instalacion_taller')).toBe(true);
+    expect(dictamenSugerido('manipulacion_cliente')).toBe(false);
+    expect(dictamenSugerido('desgaste_normal')).toBe(false);
+    expect(dictamenSugerido(null)).toBe(false);
   });
 
   it('convierte una fecha al formato de datetime-local', () => {
@@ -42,55 +55,42 @@ describe('formato', () => {
 });
 
 describe('permisos en la interfaz', () => {
-  it('cada rol empieza en su pantalla', () => {
+  it('los roles son fijos', () => {
+    expect([...ROLES]).toEqual(['administrador', 'mecanico', 'agente']);
+  });
+
+  it('el mecánico y el administrador usan el tablero; el agente va al MCP', () => {
     expect(inicioDe('mecanico')).toBe('/mis-trabajos');
-    expect(inicioDe('recepcionista')).toBe('/panel');
-    expect(inicioDe('administrador')).toBe('/panel');
-    expect(inicioDe('concesionario')).toBe('/sin-acceso');
+    expect(inicioDe('administrador')).toBe('/mis-trabajos');
+    expect(inicioDe('agente')).toBe('/sin-acceso');
   });
 
-  it('el mecánico ve sus trabajos, órdenes e inventario; nada de administración', () => {
-    expect(enlacesDe('mecanico').map((e) => e.a)).toEqual(['/mis-trabajos', '/ordenes', '/inventario']);
+  it('el mecánico ve solo sus trabajos; el administrador, órdenes y usuarios', () => {
+    expect(enlacesDe('mecanico').map((e) => e.a)).toEqual(['/mis-trabajos']);
+    expect(enlacesDe('administrador').map((e) => e.texto)).toEqual(['Órdenes', 'Usuarios']);
+    expect(enlacesDe('agente')).toEqual([]);
   });
 
-  it('la recepcionista ve panel, órdenes, clientes e inventario', () => {
-    expect(enlacesDe('recepcionista').map((e) => e.a)).toEqual(['/panel', '/ordenes', '/clientes', '/inventario']);
-  });
-
-  it('el administrador además ve usuarios, roles e integraciones', () => {
-    expect(enlacesDe('administrador').map((e) => e.a)).toEqual(
-      expect.arrayContaining(['/usuarios', '/roles', '/integraciones', '/clientes']),
-    );
-  });
-
-  it('trabajar: el mecánico asignado o el administrador', () => {
+  it('trabajar: el mecánico asignado a la etapa o el administrador', () => {
     expect(puede.trabajar('mecanico', true)).toBe(true);
     expect(puede.trabajar('mecanico', false)).toBe(false);
     expect(puede.trabajar('administrador', false)).toBe(true);
-    expect(puede.trabajar('recepcionista', true)).toBe(false);
+    expect(puede.trabajar('agente', true)).toBe(false);
   });
 
-  it('el mecánico consulta el inventario pero no lo edita', () => {
-    expect(puede.verInventario('mecanico')).toBe(true);
-    expect(puede.editarInventario('mecanico')).toBe(false);
-    expect(puede.editarInventario('recepcionista')).toBe(true);
+  it('solo el mecánico toma órdenes de la cola de su sede', () => {
+    expect(puede.tomar('mecanico')).toBe(true);
+    expect(puede.tomar('administrador')).toBe(false);
   });
 });
 
-describe('costo estimado (igual que la API)', () => {
-  it('suma horas × tarifa, servicios y repuestos', () => {
-    expect(
-      costoEstimado(
-        [
-          { horasEstimadas: 1.5, valorServicio: 20000, repuestos: [{ cantidad: 4, precioUnitario: 38000 }] },
-          { horasEstimadas: 0.5, valorServicio: 0, repuestos: [{ cantidad: 1, precioUnitario: 25000 }] },
-        ],
-        60000,
-      ),
-    ).toEqual({ horas: 2, manoObra: 120000, servicios: 20000, repuestos: 177000, total: 317000 });
+describe('mano de obra (igual que la API)', () => {
+  it('suma el precio fijo de cada SKU', () => {
+    expect(totalManoObra([{ precio: 60000 }, { precio: 180000 }, { precio: 45000.5 }])).toBe(285000.5);
   });
 
-  it('los campos vacíos o inválidos cuentan como 0', () => {
-    expect(costoEstimado([{ horasEstimadas: NaN, valorServicio: 0, repuestos: [] }], 60000).total).toBe(0);
+  it('los precios vacíos o inválidos cuentan como 0', () => {
+    expect(totalManoObra([{ precio: NaN }, { precio: 90000 }])).toBe(90000);
+    expect(totalManoObra([])).toBe(0);
   });
 });

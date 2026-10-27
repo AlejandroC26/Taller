@@ -33,7 +33,7 @@ export class Reparacion {
   @Column({ name: 'terminada_en', type: 'timestamptz', nullable: true })
   terminadaEn: Date | null;
 
-  // Total cobrado, fijado al terminar: es lo que suma el panel como facturado.
+  // Mano de obra de los servicios hechos (Σ precio de sus SKU), fijada al terminar.
   @Column({
     type: 'numeric',
     precision: 14,

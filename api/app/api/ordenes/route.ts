@@ -1,23 +1,20 @@
 import { ruta } from '@/comun/guardia';
-import { leerCuerpo, validar } from '@/comun/http';
-import { filtroOrdenesDto, nuevaOrdenDto } from '@/ordenes/dto';
-import { crearOrden, listarOrdenes } from '@/ordenes/ordenes.service';
-import { PERSONAL } from '@/usuarios/rol.entity';
+import { validar } from '@/comun/http';
+import { filtroOrdenesDto, listarOrdenes } from '@/ordenes/ordenes.service';
+import { TALLER } from '@/usuarios/rol.entity';
 
 export const runtime = 'nodejs';
 
-// Cada rol ve las suyas: el mecánico, sus asignadas; el concesionario, las de sus carros.
-//   ?estado=en_reparacion&buscar=ABC123&abiertas=1
-export const GET = ruta('todos', async ({ url, actor }) => {
+// Las órdenes llegan por el MCP (las agenda el concesionario). Aquí solo se listan.
+//   El mecánico: ?vista=mias (asignadas) o ?vista=cola (de su sede, esperando mecánico).
+//   La gestión: todas, con ?estado=…&taller=…&abiertas=1.
+export const GET = ruta(TALLER, async ({ url, actor }) => {
+  const p = url.searchParams;
   const filtro = validar(filtroOrdenesDto, {
-    estado: url.searchParams.get('estado') || undefined,
-    buscar: url.searchParams.get('buscar') || undefined,
+    vista: p.get('vista') || undefined,
+    estado: p.get('estado') || undefined,
+    tallerId: p.get('taller') ? Number(p.get('taller')) : undefined,
+    abiertas: p.get('abiertas') === '1' || undefined,
   });
-  return listarOrdenes(actor, { ...filtro, abiertas: url.searchParams.get('abiertas') === '1' });
+  return listarOrdenes(actor, filtro);
 });
-
-export const POST = ruta(
-  PERSONAL,
-  async ({ req, actor }) => crearOrden(actor, await leerCuerpo(req, nuevaOrdenDto)),
-  201,
-);

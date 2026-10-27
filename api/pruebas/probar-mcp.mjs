@@ -1,7 +1,7 @@
 // Cliente de prueba del servidor MCP, con el token MCP de la sesión iniciada.
 //   node pruebas/probar-mcp.mjs                                    lista las herramientas
-//   node pruebas/probar-mcp.mjs consultar_inventario solo_alertas=true
-//   node pruebas/probar-mcp.mjs crear_orden pruebas/orden.json
+//   node pruebas/probar-mcp.mjs estado_orden codigo=OT-0001
+//   node pruebas/probar-mcp.mjs prediagnosticar pruebas/prediagnostico.json
 //   node pruebas/probar-mcp.mjs --token <token-mcp>                otro usuario
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { readFileSync } from 'node:fs';

@@ -1,247 +1,385 @@
-import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router';
-import { api } from '../api/cliente';
-import type { Diagnostico, Item, OrdenDetalle, Tarea } from '../api/tipos';
+import { useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
+import { abrirArchivo, api, subirArchivo } from '../api/cliente';
+import { CAUSAS } from '../api/tipos';
+import type { Causa, CodigoRepuesto, Diagnostico, Evidencia, OrdenDetalle, Sede, Servicio, ServicioDiagnostico } from '../api/tipos';
 import { Boton } from '../componentes/Boton';
 import { aNumero, Area, Entrada, Seleccion } from '../componentes/Campos';
 import { Etiqueta, EstadoOrden } from '../componentes/Etiqueta';
+import { FichaOrden } from '../componentes/FichaOrden';
 import { Aviso, Cargando, Ceja, Encabezado, Metrica, Tarjeta, Ventana } from '../componentes/Superficies';
-import { costoEstimado } from '../logica/costos';
-import { horas, pesos } from '../logica/formato';
+import { totalManoObra } from '../logica/costos';
+import { cuenta, dictamenSugerido, NOMBRE_CAUSA, NOMBRE_ESPECIALIDAD, NOMBRE_PAGADOR, pesos } from '../logica/formato';
 import { puede } from '../logica/permisos';
 import { usarAccion, usarDatos } from '../logica/usarDatos';
 import { usarSesion } from '../sesion/sesion';
 
 // En el formulario los números viven como texto, tal como se escriben.
-interface RepuestoForm {
+export interface RepuestoForm {
   clave: string;
-  itemId: number | null;
+  codigo: string;
   descripcion: string;
   cantidad: string;
-  precioUnitario: string;
 }
-interface TareaForm {
+export interface ServicioForm {
   clave: string;
+  id?: number;
+  sku: string;
   descripcion: string;
-  horasEstimadas: string;
-  valorServicio: string;
+  causa: Causa | '';
+  aplica: boolean;
+  motivo: string;
   repuestos: RepuestoForm[];
+  evidencias: Evidencia[];
 }
 
 let contador = 0;
 const nuevaClave = () => `n${++contador}`;
-const tareaVacia = (): TareaForm => ({ clave: nuevaClave(), descripcion: '', horasEstimadas: '1', valorServicio: '0', repuestos: [] });
+const servicioVacio = (): ServicioForm => ({ clave: nuevaClave(), sku: '', descripcion: '', causa: '', aplica: false, motivo: '', repuestos: [], evidencias: [] });
 
-export const aFormulario = (tareas: Tarea[]): TareaForm[] =>
-  tareas.map((t) => ({
-    clave: nuevaClave(),
-    descripcion: t.descripcion,
-    horasEstimadas: String(t.horasEstimadas),
-    valorServicio: String(t.valorServicio),
-    repuestos: t.repuestos.map((r) => ({
+export const aFormulario = (servicios: ServicioDiagnostico[]): ServicioForm[] =>
+  servicios
+    .filter((s) => !s.fija)
+    .map((s) => ({
       clave: nuevaClave(),
-      itemId: r.itemId,
-      descripcion: r.descripcion,
-      cantidad: String(r.cantidad),
-      precioUnitario: String(r.precioUnitario),
-    })),
-  }));
+      id: s.id,
+      sku: s.sku,
+      descripcion: s.descripcion,
+      causa: s.causa ?? '',
+      aplica: s.garantia.aplica,
+      motivo: s.garantia.motivo,
+      repuestos: s.repuestos.map((r) => ({ clave: nuevaClave(), codigo: r.codigo_repuesto, descripcion: r.descripcion, cantidad: String(r.cantidad) })),
+      evidencias: s.evidencias,
+    }));
 
-// Lo que se envía a PUT /api/ordenes/:codigo/diagnostico.
-export const aCuerpo = (tareas: TareaForm[]) =>
-  tareas.map((t) => ({
-    descripcion: t.descripcion.trim(),
-    horasEstimadas: aNumero(t.horasEstimadas),
-    valorServicio: aNumero(t.valorServicio),
-    requierePiezas: t.repuestos.length > 0,
-    repuestos: t.repuestos.map((r) =>
-      r.itemId
-        ? { itemId: r.itemId, cantidad: aNumero(r.cantidad) }
-        : { descripcion: r.descripcion.trim(), cantidad: aNumero(r.cantidad), precioUnitario: aNumero(r.precioUnitario) },
-    ),
-  }));
+// Lo que se envía a PUT /api/ordenes/:codigo/diagnostico. Los repuestos van sin precio.
+export const aCuerpo = (observaciones: string, servicios: ServicioForm[]) => ({
+  observaciones,
+  tareas: servicios.map((s) => ({
+    ...(s.id ? { id: s.id } : {}),
+    sku: s.sku,
+    descripcion: s.descripcion.trim(),
+    causa: s.causa || null,
+    garantiaAplica: s.causa ? s.aplica : false,
+    garantiaMotivo: s.motivo.trim(),
+    repuestos: s.repuestos
+      .filter((r) => r.codigo.trim())
+      .map((r) => ({ codigoRepuesto: r.codigo.trim().toUpperCase(), ...(r.descripcion.trim() ? { descripcion: r.descripcion.trim() } : {}), cantidad: aNumero(r.cantidad) })),
+  })),
+});
+
+function SubirEvidencia({ alSubir, deshabilitado, texto = 'Adjuntar foto o PDF' }: { alSubir: (archivo: File) => Promise<void>; deshabilitado?: boolean; texto?: string }) {
+  const entrada = useRef<HTMLInputElement>(null);
+  const [ocupado, setOcupado] = useState(false);
+  return (
+    <>
+      <input
+        ref={entrada}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,application/pdf"
+        capture="environment"
+        hidden
+        aria-label={texto}
+        onChange={async (e) => {
+          const archivo = e.target.files?.[0];
+          e.target.value = '';
+          if (!archivo) return;
+          setOcupado(true);
+          try {
+            await alSubir(archivo);
+          } finally {
+            setOcupado(false);
+          }
+        }}
+      />
+      <Boton variante="azul" disabled={deshabilitado || ocupado} onClick={() => entrada.current?.click()}>
+        {ocupado ? 'Subiendo…' : texto}
+      </Boton>
+    </>
+  );
+}
+
+function ListaEvidencias({ evidencias }: { evidencias: Evidencia[] }) {
+  if (!evidencias.length) return null;
+  return (
+    <ul className="flex flex-wrap gap-8">
+      {evidencias.map((e) => (
+        <li key={e.id}>
+          <button type="button" className="cursor-pointer rounded-full bg-chip px-12 py-4 text-[12px] font-semibold text-texto hover:bg-sutil" onClick={() => abrirArchivo(`/api/evidencias/${e.id}`)}>
+            📎 {e.nombre}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export function EditorDiagnostico({
   inicial,
-  items,
-  tarifaEditable,
+  catalogo,
+  codigos,
+  sedesRemision,
   alGuardar,
   alFinalizar,
+  alRemitir,
+  alSubir,
 }: {
   inicial: Diagnostico;
-  items: Item[];
-  tarifaEditable: boolean;
-  alGuardar: (cuerpo: { observaciones: string; tarifaHora?: number; tareas: ReturnType<typeof aCuerpo> }) => Promise<unknown>;
+  catalogo: Servicio[];
+  codigos: CodigoRepuesto[];
+  sedesRemision: Sede[];
+  alGuardar: (cuerpo: ReturnType<typeof aCuerpo>) => Promise<Diagnostico>;
   alFinalizar: () => Promise<unknown>;
+  alRemitir: (taller: number, nota: string) => Promise<unknown>;
+  alSubir: (tareaId: number | null, archivo: File) => Promise<Evidencia>;
 }) {
   const [observaciones, setObservaciones] = useState(inicial.observaciones);
-  const [tarifa, setTarifa] = useState(String(inicial.tarifaHora));
-  const [tareas, setTareas] = useState<TareaForm[]>(() => (inicial.tareas.length ? aFormulario(inicial.tareas) : [tareaVacia()]));
+  const [servicios, setServicios] = useState<ServicioForm[]>(() => {
+    const f = aFormulario(inicial.servicios);
+    return f.length ? f : [servicioVacio()];
+  });
+  const [evidenciasOrden, setEvidenciasOrden] = useState(inicial.evidencias_orden);
   const [guardado, setGuardado] = useState(false);
+  const [remitiendo, setRemitiendo] = useState(false);
+  const [sedeRemision, setSedeRemision] = useState('');
+  const [nota, setNota] = useState('');
   const { ocupado, error, ejecutar } = usarAccion();
+  const fijas = inicial.servicios.filter((s) => s.fija);
+  const precioDe = (sku: string) => catalogo.find((c) => c.sku === sku)?.precio_mano_obra ?? 0;
+  const total = totalManoObra([...fijas.map((f) => ({ precio: f.precio })), ...servicios.map((s) => ({ precio: precioDe(s.sku) }))]);
+  const repuestos = servicios.reduce((s, x) => s + x.repuestos.filter((r) => r.codigo.trim()).length, 0);
 
-  const precioDe = (r: RepuestoForm) => (r.itemId ? (items.find((i) => i.id === r.itemId)?.precio ?? 0) : aNumero(r.precioUnitario));
-  const costo = useMemo(
-    () =>
-      costoEstimado(
-        tareas.map((t) => ({
-          horasEstimadas: aNumero(t.horasEstimadas),
-          valorServicio: aNumero(t.valorServicio),
-          repuestos: t.repuestos.map((r) => ({ cantidad: aNumero(r.cantidad), precioUnitario: precioDe(r) })),
-        })),
-        aNumero(tarifa),
-      ),
-    [tareas, tarifa, items],
-  );
-
-  const cambiarTarea = (clave: string, cambio: Partial<TareaForm>) => {
+  const cambiar = (clave: string, cambio: Partial<ServicioForm>) => {
     setGuardado(false);
-    setTareas((ts) => ts.map((t) => (t.clave === clave ? { ...t, ...cambio } : t)));
+    setServicios((ss) => ss.map((s) => (s.clave === clave ? { ...s, ...cambio } : s)));
   };
-  const cambiarRepuesto = (tarea: TareaForm, clave: string, cambio: Partial<RepuestoForm>) =>
-    cambiarTarea(tarea.clave, { repuestos: tarea.repuestos.map((r) => (r.clave === clave ? { ...r, ...cambio } : r)) });
-  const mover = (indice: number, hacia: -1 | 1) =>
-    setTareas((ts) => {
-      const copia = [...ts];
-      const destino = indice + hacia;
-      if (destino < 0 || destino >= copia.length) return ts;
-      [copia[indice], copia[destino]] = [copia[destino], copia[indice]];
-      return copia;
-    });
+  const cambiarRepuesto = (s: ServicioForm, clave: string, cambio: Partial<RepuestoForm>) =>
+    cambiar(s.clave, { repuestos: s.repuestos.map((r) => (r.clave === clave ? { ...r, ...cambio } : r)) });
 
+  // Guarda y vuelve a armar el formulario con lo que respondió la API (así cada servicio
+  // nuevo recibe su id y ya puede llevar evidencias).
   const guardar = () =>
     ejecutar(async () => {
-      await alGuardar({
-        observaciones,
-        ...(tarifaEditable ? { tarifaHora: aNumero(tarifa) } : {}),
-        tareas: aCuerpo(tareas),
-      });
+      const d = await alGuardar(aCuerpo(observaciones, servicios));
+      setServicios(aFormulario(d.servicios));
       setGuardado(true);
+      return d;
     });
+
+  const porCatalogo = useMemo(() => {
+    const grupos = new Map<string, Servicio[]>();
+    for (const s of catalogo) grupos.set(s.especialidad, [...(grupos.get(s.especialidad) ?? []), s]);
+    return [...grupos.entries()];
+  }, [catalogo]);
 
   return (
     <div className="grid gap-40 lg:grid-cols-[2fr_1fr]">
-      <div className="flex min-w-0 flex-col gap-24">
-        <Tarjeta className="grid gap-16 sm:grid-cols-[2fr_1fr]">
+      <div className="flex min-w-0 flex-col gap-20">
+        <datalist id="codigos-repuesto">
+          {codigos.map((c) => (
+            <option key={c.codigo} value={c.codigo}>
+              {c.descripcion}
+            </option>
+          ))}
+        </datalist>
+        <Tarjeta>
           <Area etiqueta="Observaciones generales" value={observaciones} onChange={(e) => setObservaciones(e.target.value)} placeholder="Qué encontró al revisar el vehículo" />
-          <Entrada
-            etiqueta="Tarifa por hora"
-            type="number"
-            min={0}
-            value={tarifa}
-            disabled={!tarifaEditable}
-            onChange={(e) => setTarifa(e.target.value)}
-            ayuda={tarifaEditable ? 'Mano de obra en pesos' : 'La define recepción'}
-          />
         </Tarjeta>
 
-        <ol className="flex flex-col gap-24" aria-label="Paso a paso">
-          {tareas.map((t, i) => (
-            <li key={t.clave}>
-              <Tarjeta className="flex flex-col gap-16">
-                <div className="flex flex-wrap items-center justify-between gap-8">
-                  <p className="mono">Paso {i + 1}</p>
-                  <div className="flex gap-8">
-                    <Boton variante="contorno" onClick={() => mover(i, -1)} disabled={i === 0} aria-label={`Subir paso ${i + 1}`}>
-                      ↑
-                    </Boton>
-                    <Boton variante="contorno" onClick={() => mover(i, 1)} disabled={i === tareas.length - 1} aria-label={`Bajar paso ${i + 1}`}>
-                      ↓
-                    </Boton>
-                    <Boton variante="contorno" onClick={() => setTareas((ts) => ts.filter((x) => x.clave !== t.clave))} aria-label={`Quitar paso ${i + 1}`}>
+        {fijas.map((f) => (
+          <Tarjeta key={f.id} className="flex flex-wrap items-center justify-between gap-12">
+            <div>
+              <p className="font-semibold">{f.servicio}</p>
+              <p className="text-body-sm text-texto-2">{f.descripcion}</p>
+            </div>
+            <Etiqueta tono="listo">Hecha · {pesos(f.precio)}</Etiqueta>
+          </Tarjeta>
+        ))}
+
+        <ol className="flex flex-col gap-20" aria-label="Servicios">
+          {servicios.map((s, i) => {
+            const servicio = catalogo.find((c) => c.sku === s.sku);
+            return (
+              <li key={s.clave}>
+                <Tarjeta className="flex flex-col gap-16">
+                  <div className="flex flex-wrap items-center justify-between gap-8">
+                    <p className="mono text-texto-3">Servicio {i + 1}</p>
+                    <Boton variante="suave" onClick={() => setServicios((ss) => ss.filter((x) => x.clave !== s.clave))} aria-label={`Quitar servicio ${i + 1}`}>
                       Quitar
                     </Boton>
                   </div>
-                </div>
-                <Area etiqueta="Qué hacer" value={t.descripcion} onChange={(e) => cambiarTarea(t.clave, { descripcion: e.target.value })} rows={2} required />
-                <div className="grid gap-16 sm:grid-cols-2">
-                  <Entrada etiqueta="Horas estimadas" type="number" min={0} step={0.25} value={t.horasEstimadas} onChange={(e) => cambiarTarea(t.clave, { horasEstimadas: e.target.value })} />
-                  <Entrada etiqueta="Valor del servicio" type="number" min={0} step={1000} value={t.valorServicio} onChange={(e) => cambiarTarea(t.clave, { valorServicio: e.target.value })} ayuda="Precio fijo, aparte de las horas" />
-                </div>
+                  <Seleccion etiqueta="Servicio (SKU)" value={s.sku} onChange={(e) => cambiar(s.clave, { sku: e.target.value })} ayuda={servicio ? `Mano de obra ${pesos(servicio.precio_mano_obra)} · ${servicio.horas_estandar} h estándar` : undefined}>
+                    <option value="">Elija un servicio</option>
+                    {porCatalogo.map(([especialidad, lista]) => (
+                      <optgroup key={especialidad} label={NOMBRE_ESPECIALIDAD[especialidad as keyof typeof NOMBRE_ESPECIALIDAD]}>
+                        {lista.map((c) => (
+                          <option key={c.sku} value={c.sku}>
+                            {c.sku} · {c.nombre} · {pesos(c.precio_mano_obra)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </Seleccion>
+                  <Area etiqueta="Qué encontró y qué va a hacer" value={s.descripcion} onChange={(e) => cambiar(s.clave, { descripcion: e.target.value })} rows={2} />
 
-                <div className="flex flex-col gap-16 border-t border-borde pt-16">
-                  <p className="mono text-texto-2">Repuestos {t.repuestos.length ? `(${t.repuestos.length})` : '· no requiere'}</p>
-                  {t.repuestos.map((r) => {
-                    const item = items.find((x) => x.id === r.itemId);
-                    return (
-                      <div key={r.clave} className="grid gap-16 sm:grid-cols-[2fr_1fr_auto] sm:items-end">
-                        {r.itemId !== null ? (
-                          <Seleccion etiqueta="Ítem del inventario" value={r.itemId} onChange={(e) => cambiarRepuesto(t, r.clave, { itemId: Number(e.target.value) })}>
-                            {items.map((x) => (
-                              <option key={x.id} value={x.id}>
-                                {x.codigo} · {x.nombre} · {pesos(x.precio)} · {x.cantidad} disp.
-                              </option>
-                            ))}
-                          </Seleccion>
-                        ) : (
-                          <div className="grid gap-16 sm:grid-cols-[2fr_1fr]">
-                            <Entrada etiqueta="Pieza fuera de inventario" value={r.descripcion} onChange={(e) => cambiarRepuesto(t, r.clave, { descripcion: e.target.value })} required />
-                            <Entrada etiqueta="Precio estimado" type="number" min={0} value={r.precioUnitario} onChange={(e) => cambiarRepuesto(t, r.clave, { precioUnitario: e.target.value })} />
-                          </div>
-                        )}
-                        <Entrada
-                          etiqueta="Cantidad"
-                          type="number"
-                          min={1}
-                          value={r.cantidad}
-                          onChange={(e) => cambiarRepuesto(t, r.clave, { cantidad: e.target.value })}
-                          ayuda={item && item.cantidad < aNumero(r.cantidad) ? 'No alcanza: se pedirá' : undefined}
+                  <div className="grid gap-16 rounded-xl border border-borde bg-lienzo p-16 sm:grid-cols-2">
+                    <Seleccion
+                      etiqueta="Causa de la falla"
+                      value={s.causa}
+                      onChange={(e) => {
+                        const causa = e.target.value as Causa | '';
+                        cambiar(s.clave, { causa, aplica: dictamenSugerido(causa || null) });
+                      }}
+                    >
+                      <option value="">Sin falla atribuible (mantenimiento)</option>
+                      {CAUSAS.map((c) => (
+                        <option key={c} value={c}>
+                          {NOMBRE_CAUSA[c]}
+                        </option>
+                      ))}
+                    </Seleccion>
+                    <fieldset className="flex flex-col gap-8" disabled={!s.causa}>
+                      <legend className="mb-8 text-body-sm font-medium">¿Aplica garantía?</legend>
+                      <div className="flex gap-8">
+                        {[true, false].map((v) => (
+                          <label key={String(v)} className={`flex h-40 flex-1 cursor-pointer items-center justify-center rounded-full border text-body-sm font-semibold ${s.aplica === v && s.causa ? 'border-accion bg-accion text-accion-texto' : 'border-borde'} ${!s.causa ? 'opacity-40' : ''}`}>
+                            <input type="radio" className="sr-only" name={`aplica-${s.clave}`} checked={s.aplica === v} onChange={() => cambiar(s.clave, { aplica: v })} />
+                            {v ? 'Sí aplica' : 'No aplica'}
+                          </label>
+                        ))}
+                      </div>
+                      {s.causa && s.aplica !== dictamenSugerido(s.causa) && <p className="text-[12px] text-texto-2">Cambió el dictamen sugerido: explique por qué.</p>}
+                    </fieldset>
+                    {s.causa && (
+                      <div className="sm:col-span-2">
+                        <Area
+                          etiqueta="Motivo del dictamen"
+                          value={s.motivo}
+                          onChange={(e) => cambiar(s.clave, { motivo: e.target.value })}
+                          rows={2}
+                          placeholder="Lo que verá el concesionario y el cliente"
+                          ayuda={!s.motivo.trim() ? 'Obligatorio para finalizar' : undefined}
                         />
-                        <Boton variante="contorno" onClick={() => cambiarTarea(t.clave, { repuestos: t.repuestos.filter((x) => x.clave !== r.clave) })}>
+                      </div>
+                    )}
+                    {s.causa && (
+                      <div className="flex flex-col gap-8 sm:col-span-2">
+                        <ListaEvidencias evidencias={s.evidencias} />
+                        <div className="flex flex-wrap items-center gap-12">
+                          <SubirEvidencia
+                            deshabilitado={!s.id}
+                            alSubir={async (archivo) => {
+                              const ev = await ejecutar(() => alSubir(s.id!, archivo));
+                              if (ev) cambiar(s.clave, { evidencias: [...s.evidencias, ev] });
+                            }}
+                          />
+                          <span className="text-[12px] text-texto-2">
+                            {!s.id ? 'Guarde el borrador para adjuntar evidencias' : s.aplica && !s.evidencias.length ? 'Si aplica garantía, la evidencia es obligatoria' : ''}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-12">
+                    <p className="text-body-sm font-medium">
+                      Repuestos a comprar {s.repuestos.length ? `(${s.repuestos.length})` : <span className="text-texto-3">· ninguno</span>}
+                    </p>
+                    {s.repuestos.map((r) => (
+                      <div key={r.clave} className="grid gap-12 sm:grid-cols-[minmax(150px,1fr)_2fr_80px_auto] sm:items-end">
+                        <Entrada
+                          etiqueta="Código universal"
+                          list="codigos-repuesto"
+                          value={r.codigo}
+                          onChange={(e) => {
+                            const codigo = e.target.value.toUpperCase();
+                            cambiarRepuesto(s, r.clave, { codigo, descripcion: codigos.find((c) => c.codigo === codigo)?.descripcion ?? r.descripcion });
+                          }}
+                          placeholder="PAS-DEL-CER"
+                        />
+                        <Entrada etiqueta="Descripción" value={r.descripcion} onChange={(e) => cambiarRepuesto(s, r.clave, { descripcion: e.target.value })} />
+                        <Entrada etiqueta="Cantidad" type="number" min={1} value={r.cantidad} onChange={(e) => cambiarRepuesto(s, r.clave, { cantidad: e.target.value })} />
+                        <Boton variante="suave" onClick={() => cambiar(s.clave, { repuestos: s.repuestos.filter((x) => x.clave !== r.clave) })}>
                           Quitar
                         </Boton>
                       </div>
-                    );
-                  })}
-                  <div className="flex flex-wrap gap-8">
-                    <Boton
-                      variante="contorno"
-                     
-                      disabled={items.length === 0}
-                      onClick={() => cambiarTarea(t.clave, { repuestos: [...t.repuestos, { clave: nuevaClave(), itemId: items[0]?.id ?? null, descripcion: '', cantidad: '1', precioUnitario: '0' }] })}
-                    >
-                      + Del inventario
-                    </Boton>
-                    <Boton
-                      variante="contorno"
-                     
-                      onClick={() => cambiarTarea(t.clave, { repuestos: [...t.repuestos, { clave: nuevaClave(), itemId: null, descripcion: '', cantidad: '1', precioUnitario: '0' }] })}
-                    >
-                      + Pieza que no hay
-                    </Boton>
+                    ))}
+                    <div>
+                      <Boton variante="suave" onClick={() => cambiar(s.clave, { repuestos: [...s.repuestos, { clave: nuevaClave(), codigo: '', descripcion: '', cantidad: '1' }] })}>
+                        + Repuesto
+                      </Boton>
+                    </div>
                   </div>
-                </div>
-              </Tarjeta>
-            </li>
-          ))}
+                </Tarjeta>
+              </li>
+            );
+          })}
         </ol>
-        <Boton variante="contorno" onClick={() => setTareas((ts) => [...ts, tareaVacia()])}>
-          + Agregar paso
-        </Boton>
+        <Boton onClick={() => setServicios((ss) => [...ss, servicioVacio()])}>+ Agregar servicio</Boton>
+
+        {inicial.por_garantia && (
+          <Tarjeta className="flex flex-col gap-12">
+            <p className="font-semibold">Evidencias del reclamo de garantía</p>
+            <p className="text-body-sm text-texto-2">La orden vino por garantía: adjunte al menos una evidencia que respalde su dictamen, aplique o no.</p>
+            <ListaEvidencias evidencias={evidenciasOrden} />
+            <div>
+              <SubirEvidencia
+                texto="Adjuntar evidencia de la orden"
+                alSubir={async (archivo) => {
+                  const ev = await ejecutar(() => alSubir(null, archivo));
+                  if (ev) setEvidenciasOrden((e) => [...e, ev]);
+                }}
+              />
+            </div>
+          </Tarjeta>
+        )}
       </div>
 
-      <aside className="flex flex-col gap-24 lg:sticky lg:top-96 lg:self-start">
-        <Ventana titulo="Costo estimado">
-          <Metrica etiqueta={`Mano de obra · ${horas(costo.horas)}`} valor={pesos(costo.manoObra)} />
-          <Metrica etiqueta="Servicios" valor={pesos(costo.servicios)} />
-          <Metrica etiqueta="Repuestos" valor={pesos(costo.repuestos)} />
-          <Metrica etiqueta="Total" valor={<span data-testid="total">{pesos(costo.total)}</span>} />
+      <aside className="flex flex-col gap-20 lg:sticky lg:top-96 lg:self-start">
+        <Ventana titulo="Para facturación">
+          <Metrica etiqueta="Mano de obra (SKU)" valor={<span data-testid="total">{pesos(total)}</span>} />
+          <Metrica etiqueta="Repuestos" valor={cuenta(repuestos, 'por cotizar', 'por cotizar')} detalle="Facturación busca los precios en las tiendas" />
         </Ventana>
-        <Boton variante="primario" onClick={guardar} disabled={ocupado || tareas.length === 0}>
+        <Boton variante="primario" onClick={guardar} disabled={ocupado}>
           {ocupado ? 'Guardando…' : 'Guardar borrador'}
         </Boton>
         <Boton
-          variante="contorno"
-          disabled={ocupado || tareas.length === 0}
+          disabled={ocupado || servicios.length === 0}
           onClick={() =>
             ejecutar(async () => {
-              await alGuardar({ observaciones, ...(tarifaEditable ? { tarifaHora: aNumero(tarifa) } : {}), tareas: aCuerpo(tareas) });
+              await alGuardar(aCuerpo(observaciones, servicios));
               await alFinalizar();
             })
           }
         >
-          Guardar y finalizar diagnóstico
+          Finalizar y enviar a garantía
         </Boton>
+        {sedesRemision.length > 0 &&
+          (remitiendo ? (
+            <Tarjeta className="flex flex-col gap-12">
+              <p className="font-semibold">Remitir a sede especializada</p>
+              <Seleccion etiqueta="Sede" value={sedeRemision} onChange={(e) => setSedeRemision(e.target.value)}>
+                <option value="">Elija la sede</option>
+                {sedesRemision.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.nombre} · {s.especialidades.map((e) => NOMBRE_ESPECIALIDAD[e]).join(', ')}
+                  </option>
+                ))}
+              </Seleccion>
+              <Area etiqueta="Nota para el especialista" value={nota} onChange={(e) => setNota(e.target.value)} rows={3} placeholder="Qué encontró en la revisión general" />
+              <p className="text-[12px] text-texto-2">La revisión general queda cobrada junto con lo que haga el especialista.</p>
+              <div className="flex gap-8">
+                <Boton variante="primario" disabled={ocupado || !sedeRemision || nota.trim().length < 5} onClick={() => ejecutar(() => alRemitir(Number(sedeRemision), nota.trim()))}>
+                  Remitir
+                </Boton>
+                <Boton onClick={() => setRemitiendo(false)}>Volver</Boton>
+              </div>
+            </Tarjeta>
+          ) : (
+            <Boton variante="azul" onClick={() => setRemitiendo(true)}>
+              Remitir a sede especializada
+            </Boton>
+          ))}
         {guardado && !error && <Aviso tipo="info">Borrador guardado.</Aviso>}
         {error && <Aviso>{error}</Aviso>}
       </aside>
@@ -252,44 +390,56 @@ export function EditorDiagnostico({
 function Lectura({ d }: { d: Diagnostico }) {
   return (
     <div className="grid gap-40 lg:grid-cols-[2fr_1fr]">
-      <div className="flex min-w-0 flex-col gap-24">
+      <div className="flex min-w-0 flex-col gap-16">
         {d.observaciones && <p className="text-texto-2">{d.observaciones}</p>}
-        <ol className="flex flex-col">
-          {d.tareas.map((t) => (
-            <li key={t.id} className="border-b border-borde py-16">
-              <div className="flex flex-wrap justify-between gap-8">
-                <p>
-                  <span className="mono mr-8 text-texto-3">{t.posicion}</span>
-                  {t.descripcion}
+        {d.servicios.map((s) => (
+          <Tarjeta key={s.id} className="flex flex-col gap-12">
+            <div className="flex flex-wrap items-start justify-between gap-8">
+              <div>
+                <p className="font-semibold">
+                  <span className="mono mr-8 text-texto-3">{s.sku}</span>
+                  {s.servicio}
                 </p>
-                <p className="mono text-texto-2">
-                  {horas(t.horasEstimadas)} · {pesos(t.valorServicio)}
-                </p>
+                {s.descripcion && <p className="text-body-sm text-texto-2">{s.descripcion}</p>}
               </div>
-              {t.repuestos.length > 0 && (
-                <ul className="mt-8 flex flex-col gap-8 pl-24 text-body-sm">
-                  {t.repuestos.map((r) => (
-                    <li key={r.id} className="flex flex-wrap items-center justify-between gap-8">
-                      <span>
-                        {r.cantidad} × {r.descripcion} {r.codigo && <span className="text-texto-2">({r.codigo})</span>}
-                      </span>
-                      <span className="flex items-center gap-16">
-                        {pesos(r.cantidad * r.precioUnitario)}
-                        <Etiqueta tono={r.disponible ? "listo" : "alerta"}>{r.disponible ? 'En stock' : 'Pedir'}</Etiqueta>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          ))}
-        </ol>
+              <span className="font-plus-jakarta-sans font-bold">{pesos(s.precio)}</span>
+            </div>
+            {s.causa && (
+              <div className="flex flex-col gap-8 rounded-xl border border-borde bg-lienzo p-12 text-body-sm">
+                <p>
+                  <strong className="font-semibold">{s.causa_nombre}</strong> · dictamen del mecánico: {s.garantia.aplica ? 'aplica garantía' : 'no aplica'} — {s.garantia.motivo}
+                </p>
+                {s.garantia.valida !== null && (
+                  <p className="flex flex-wrap items-center gap-8">
+                    <Etiqueta tono={s.garantia.valida ? 'listo' : 'alerta'}>{s.garantia.valida ? 'Garantía válida' : 'Garantía no válida'}</Etiqueta>
+                    <span>{s.garantia.respuesta}</span>
+                    <span className="text-texto-3">Paga: {NOMBRE_PAGADOR[s.garantia.pagador]}</span>
+                  </p>
+                )}
+                <ListaEvidencias evidencias={s.evidencias} />
+              </div>
+            )}
+            {s.repuestos.length > 0 && (
+              <ul className="text-body-sm">
+                {s.repuestos.map((r) => (
+                  <li key={r.id}>
+                    {r.cantidad} × {r.descripcion} <span className="mono text-texto-3">{r.codigo_repuesto}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Tarjeta>
+        ))}
+        {d.evidencias_orden.length > 0 && (
+          <div>
+            <Ceja className="mb-8">Evidencias de la orden</Ceja>
+            <ListaEvidencias evidencias={d.evidencias_orden} />
+          </div>
+        )}
       </div>
-      <Ventana titulo="Costo estimado">
-        <Metrica etiqueta={`Mano de obra · ${horas(d.costo.horas)}`} valor={pesos(d.costo.manoObra)} />
-        <Metrica etiqueta="Servicios" valor={pesos(d.costo.servicios)} />
-        <Metrica etiqueta="Repuestos" valor={pesos(d.costo.repuestos)} />
-        <Metrica etiqueta="Total" valor={pesos(d.costo.total)} />
+      <Ventana titulo="Para facturación">
+        <Metrica etiqueta="Mano de obra (SKU)" valor={pesos(d.total_mano_obra)} />
+        <Metrica etiqueta="Repuestos" valor={cuenta(d.repuestos_a_comprar, 'por cotizar', 'por cotizar')} />
       </Ventana>
     </div>
   );
@@ -298,36 +448,58 @@ function Lectura({ d }: { d: Diagnostico }) {
 export function DiagnosticoPagina() {
   const { codigo = '' } = useParams();
   const { actor } = usarSesion();
+  const navegar = useNavigate();
   const ruta = `/api/ordenes/${codigo}/diagnostico`;
   const diag = usarDatos<Diagnostico>(ruta);
   const orden = usarDatos<OrdenDetalle>(`/api/ordenes/${codigo}`);
-  const { datos: items } = usarDatos<Item[]>('/api/inventario');
+  const { datos: catalogo } = usarDatos<Servicio[]>('/api/servicios');
+  const { datos: codigos } = usarDatos<CodigoRepuesto[]>('/api/codigos-repuesto');
+  const { datos: sedes } = usarDatos<Sede[]>('/api/talleres');
 
   if ((diag.cargando && !diag.datos) || (orden.cargando && !orden.datos)) return <Cargando />;
   if (diag.error || !diag.datos || !orden.datos || !actor) return <Aviso>{diag.error ?? orden.error ?? 'Sin diagnóstico'}</Aviso>;
 
   const d = diag.datos;
-  const asignado = orden.datos.asignaciones.some((a) => a.mecanicoId === actor.id && a.etapa === 'diagnostico');
-  const editable = d.estado === 'borrador' && d.estadoOrden === 'en_diagnostico' && puede.trabajar(actor.rol, asignado);
+  const o = orden.datos;
+  const asignado = o.asignaciones.some((a) => a.mecanico_id === actor.id && a.etapa === 'diagnostico');
+  const editable = d.estado === 'borrador' && d.estado_orden === 'en_diagnostico' && puede.trabajar(actor.rol, asignado);
+  const sedesRemision = o.sede.tipo === 'mantenimiento' ? (sedes ?? []).filter((s) => s.activo && s.tipo === 'especializado' && s.id !== o.sede.id) : [];
 
   return (
     <>
-      <Encabezado ceja={`Orden ${codigo} · ${orden.datos.vehiculo.placa} · ${d.mecanico}`} titulo="Diagnóstico">
-        <EstadoOrden estado={d.estadoOrden} />
-        <Link to={`/ordenes/${codigo}`} className="flex h-36 items-center px-14 text-body-sm text-texto-3 hover:underline">
-          Volver a la orden
+      <Encabezado ceja={`Orden ${codigo} · ${o.sede.nombre}`} titulo="Diagnóstico">
+        <EstadoOrden estado={d.estado_orden} />
+        <Link to={`/ordenes/${codigo}`} className="flex h-40 items-center px-12 text-body-sm text-texto-2 hover:underline">
+          Ver orden
         </Link>
       </Encabezado>
-      <Ceja className="mb-24">Motivo: {orden.datos.motivo}</Ceja>
+      <div className="mb-40">
+        <FichaOrden orden={o} />
+      </div>
       {editable ? (
         <EditorDiagnostico
           inicial={d}
-          items={items ?? []}
-          tarifaEditable={puede.cambiarTarifa(actor.rol)}
-          alGuardar={async (cuerpo) => diag.setDatos(await api<Diagnostico>(ruta, { metodo: 'PUT', cuerpo }))}
+          catalogo={catalogo ?? []}
+          codigos={codigos ?? []}
+          sedesRemision={sedesRemision}
+          alGuardar={async (cuerpo) => {
+            const r = await api<Diagnostico>(ruta, { metodo: 'PUT', cuerpo });
+            diag.setDatos(r);
+            return r;
+          }}
           alFinalizar={async () => {
             diag.setDatos(await api<Diagnostico>(`${ruta}/finalizar`, { metodo: 'POST' }));
             orden.recargar();
+          }}
+          alRemitir={async (taller, nota) => {
+            await api(`/api/ordenes/${codigo}/remitir`, { metodo: 'POST', cuerpo: { taller, nota } });
+            navegar('/mis-trabajos');
+          }}
+          alSubir={(tareaId, archivo) => {
+            const formulario = new FormData();
+            formulario.append('archivo', archivo);
+            if (tareaId) formulario.append('tareaId', String(tareaId));
+            return subirArchivo<Evidencia>(`/api/ordenes/${codigo}/evidencias`, formulario);
           }}
         />
       ) : (

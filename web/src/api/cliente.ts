@@ -67,3 +67,27 @@ export async function api<T>(
   }
   return json as T;
 }
+
+// Sube un archivo como formulario multipart (por ejemplo, una evidencia).
+export async function subirArchivo<T>(ruta: string, formulario: FormData): Promise<T> {
+  const token = leerToken();
+  let respuesta: Response;
+  try {
+    respuesta = await fetch(ruta, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: formulario });
+  } catch {
+    throw new ErrorApi(0, 'No hay conexión con la API del taller');
+  }
+  const json = await respuesta.json().catch(() => null);
+  if (!respuesta.ok) throw new ErrorApi(respuesta.status, (json as { message?: string } | null)?.message ?? `Error ${respuesta.status}`);
+  return json as T;
+}
+
+// Descarga un archivo protegido (por ejemplo, una evidencia) para verlo en otra pestaña.
+export async function abrirArchivo(ruta: string) {
+  const token = leerToken();
+  const respuesta = await fetch(ruta, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!respuesta.ok) throw new ErrorApi(respuesta.status, 'No se pudo abrir el archivo');
+  const url = URL.createObjectURL(await respuesta.blob());
+  window.open(url, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}

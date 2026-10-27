@@ -4,6 +4,7 @@ import { aActor } from './actor';
 import type { Actor } from './actor';
 import { cifrarClave, claveCorrecta } from './claves';
 import type { EditarUsuario, NuevoUsuario } from './dto';
+import { Taller } from '../talleres/taller.entity';
 import { Rol } from './rol.entity';
 import { emitir, verificar } from './tokens';
 import type { Audiencia } from './tokens';
@@ -53,6 +54,8 @@ const aRespuesta = (u: Usuario) => ({
   telefono: u.telefono,
   usuario: u.usuario,
   rol: u.rol.nombre,
+  // La sede del mecánico; el administrador y los agentes no tienen.
+  taller: u.taller ? { id: u.taller.id, codigo: u.taller.codigo, nombre: u.taller.nombre } : null,
   activo: u.activo,
   creadoEn: u.creadoEn,
 });
@@ -81,6 +84,15 @@ async function exigirUnico(datos: { documento?: string; usuario?: string }, salv
   }
 }
 
+// El mecánico pertenece a una sede; el administrador y los agentes no tienen sede.
+async function sedeDe(rol: string, tallerId: number | null | undefined): Promise<Taller | null> {
+  if (rol !== 'mecanico') return null;
+  if (!tallerId) throw invalido('Un mecánico debe pertenecer a una sede: indique tallerId');
+  const sede = await (await bd()).getRepository(Taller).findOneBy({ id: tallerId });
+  if (!sede) throw invalido(`No existe la sede ${tallerId}`);
+  return sede;
+}
+
 export async function crearUsuario(datos: NuevoUsuario) {
   await exigirUnico(datos);
   const repo = (await bd()).getRepository(Usuario);
@@ -93,6 +105,7 @@ export async function crearUsuario(datos: NuevoUsuario) {
       usuario: datos.usuario,
       claveHash: await cifrarClave(datos.clave),
       rol: await buscarRol(datos.rol),
+      taller: await sedeDe(datos.rol, datos.tallerId),
     }),
   );
   return aRespuesta(usuario);
@@ -107,9 +120,12 @@ export async function editarUsuario(id: string, datos: EditarUsuario, actor: Act
     throw invalido('No puede desactivar su propia cuenta ni cambiar su propio rol');
   }
   await exigirUnico({ documento: datos.documento }, id);
-  const { clave, rol, ...resto } = datos;
+  const { clave, rol, tallerId, ...resto } = datos;
   Object.assign(usuario, resto);
   if (rol) usuario.rol = await buscarRol(rol);
+  if (rol || tallerId !== undefined) {
+    usuario.taller = await sedeDe(usuario.rol.nombre, tallerId === undefined ? usuario.taller?.id : tallerId);
+  }
   if (clave) usuario.claveHash = await cifrarClave(clave);
   return aRespuesta(await repo.save(usuario));
 }

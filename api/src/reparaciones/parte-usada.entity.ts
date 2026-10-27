@@ -1,11 +1,11 @@
 import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import type { Relation } from 'typeorm';
-import { numerico } from '../comun/columnas';
-import { Item } from '../inventario/item.entity';
+import { CompraRepuesto } from '../cotizaciones/compra.entity';
 import { Usuario } from '../usuarios/usuario.entity';
 import { Reparacion } from './reparacion.entity';
 
-// Pieza que salió del inventario para esta reparación.
+// Registro de lo que el mecánico usó y gastó. El taller no tiene inventario: esto solo
+// deja constancia (y se reporta a facturación al terminar).
 @Entity('partes_usadas')
 export class ParteUsada {
   @PrimaryGeneratedColumn({ type: 'integer' })
@@ -15,16 +15,22 @@ export class ParteUsada {
   @JoinColumn({ name: 'reparacion_id' })
   reparacion: Relation<Reparacion>;
 
-  @ManyToOne(() => Item, { nullable: false, eager: true })
-  @JoinColumn({ name: 'item_id' })
-  item: Relation<Item>;
+  @Column({ name: 'codigo_repuesto', type: 'varchar', length: 40 })
+  codigoRepuesto: string;
+
+  @Column({ type: 'varchar', length: 160, default: '' })
+  descripcion: string;
 
   @Column({ type: 'integer' })
   cantidad: number;
 
-  // Precio del ítem en el momento de usarlo.
-  @Column({ name: 'precio_unitario', type: 'numeric', precision: 12, scale: 2, transformer: numerico })
-  precioUnitario: number;
+  // La línea de la orden de compra de la que salió, si aplica.
+  @ManyToOne(() => CompraRepuesto, { nullable: true, onDelete: 'SET NULL', eager: true })
+  @JoinColumn({ name: 'compra_id' })
+  compra: Relation<CompraRepuesto> | null;
+
+  @Column({ type: 'varchar', length: 300, default: '' })
+  nota: string;
 
   @ManyToOne(() => Usuario, { nullable: false })
   @JoinColumn({ name: 'registrada_por' })
