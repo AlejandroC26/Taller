@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import {
   cerrarClientes,
   cuenta,
+  despejarRelacion,
   entrarAdmin,
   fallar,
   fallidas,
@@ -56,6 +57,7 @@ try {
 
   paso('2. El concesionario agenda una revisión general (MCP)');
   const mensajes = ['Hace un ruido raro adelante, no sé qué es'];
+  await despejarRelacion('REL-1005');
   const pre = await llamar('agente-concesionario', 'prediagnosticar', { id_relacion: 'REL-1005', mensajes_cliente: mensajes });
   revisar(pre.ruta === 'revision_general' && pre.sede_sugerida?.codigo === 'PL-CENTRO', 'sin síntoma claro: revisión general en PL-CENTRO', pre);
   let orden = await llamar('agente-concesionario', 'agendar_cita', {

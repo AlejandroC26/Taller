@@ -16,6 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   cerrarClientes,
+  despejarRelacion,
   fallar,
   fallidas,
   gris,
@@ -143,6 +144,7 @@ async function correrCaso(nombre) {
   }
 
   // 2. Agenda la cita en la primera franja libre de esa sede.
+  await despejarRelacion(c.idRelacion);
   const fechaHora = await primeraFranja(sede);
   let orden = await llamar('agente-concesionario', 'agendar_cita', {
     id_relacion: c.idRelacion,
@@ -260,6 +262,7 @@ try {
     const [idRelacion, sede, ...mensajes] = args;
     const textos = mensajes.length ? mensajes : ['Revisión'];
     const destino = sede ?? (await llamar('agente-concesionario', 'prediagnosticar', { id_relacion: idRelacion, mensajes_cliente: textos })).sede_sugerida.codigo;
+    await despejarRelacion(idRelacion);
     const o = await llamar('agente-concesionario', 'agendar_cita', { id_relacion: idRelacion, taller: destino, fecha_hora: await primeraFranja(destino), mensajes_cliente: textos });
     console.log(`${o.codigo} agendada en ${o.sede.nombre}. ${o.siguiente_paso.descripcion}`);
   } else if (comando === 'estado') {

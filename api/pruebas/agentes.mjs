@@ -144,6 +144,25 @@ export const ordenDeCompra = (repuestos) =>
     return { codigo_repuesto: r.codigo_repuesto, cantidad: r.cantidad, tienda, precio_unitario: precio };
   });
 
+// El taller no permite dos órdenes abiertas para el mismo id_relacion, y una prueba a mano
+// (o una corrida cortada) puede haber dejado una a medias: se cierra antes de agendar.
+export async function despejarRelacion(idRelacion) {
+  const { elementos } = await llamar('agente-concesionario', 'listar_ordenes', { id_relacion: idRelacion, abiertas: true }, { mostrar: false });
+  const nota = 'Cierre del simulador: orden abierta de una prueba anterior';
+  for (const o of elementos) {
+    let estado = o.estado;
+    if (estado === 'en_reparacion') {
+      throw new Error(`${o.codigo} (${idRelacion}) sigue en reparación: termínela en la web o por MCP antes de simular con esa relación`);
+    }
+    if (estado === 'pendiente_facturacion') {
+      estado = (await llamar('agente-facturacion', 'registrar_pago', { codigo: o.codigo, referencia_pse: `PSE-CIERRE-${Date.now()}`, valor: 0 }, { mostrar: false })).estado;
+    }
+    if (estado === 'facturada' || estado === 'rechazada') await llamar('agente-concesionario', 'registrar_salida', { codigo: o.codigo, nota }, { mostrar: false });
+    else await llamar('agente-concesionario', 'cancelar_cita', { codigo: o.codigo, motivo: nota }, { mostrar: false });
+    console.log(gris(`    ${o.codigo} de ${idRelacion} seguía abierta (${o.estado}): se cerró`));
+  }
+}
+
 // Primera franja libre de una sede desde mañana.
 export async function primeraFranja(sede) {
   for (let d = 1; d <= 14; d++) {

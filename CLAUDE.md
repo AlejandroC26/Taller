@@ -345,6 +345,7 @@ El contrato está en `api/src/integraciones/contrato.ts`, con ejemplos en `docs/
 - **Simulador** (`api`, `npm run simular -- todos`):
   - Corre los 11 casos de garantía, ruta, remisión y rechazo por MCP, siguiendo `siguiente_paso`.
   - Crea una vez los usuarios agente y un mecánico por sede, y guarda sus claves y tokens en `pruebas/.usuarios-simulacion.json` (en `.gitignore`).
+  - Antes de agendar, `despejarRelacion` (`pruebas/agentes.mjs`) cierra las órdenes que una prueba a mano dejó abiertas para ese `id_relacion`. Cancela, cobra o da salida según el estado. Una orden `en_reparacion` hay que terminarla a mano.
 - **Punta a punta** (`api`, `npm run flujo`):
   - El lado manual por REST: cola de la sede, tomar, remitir, diagnóstico con evidencia, reparación y partes usadas.
   - Revisa los permisos (401, 403, 404 de lo ajeno, 409, 400).
