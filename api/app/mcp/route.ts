@@ -1,4 +1,5 @@
 import { createMcpHandler } from '@modelcontextprotocol/server';
+import { ErrorHttp } from '@/comun/errores';
 import { crearServidorMcp } from '@/mcp/herramientas';
 import type { Actor } from '@/usuarios/actor';
 import { tokenDe } from '@/usuarios/tokens';
@@ -17,9 +18,15 @@ async function atender(req: Request): Promise<Response> {
   try {
     actor = await actorDelToken(token, 'mcp');
   } catch (error) {
+    if (error instanceof ErrorHttp && error.estado === 401) {
+      return Response.json({ error: error.message }, { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } });
+    }
+    // Si falla otra cosa (la base de datos apagada, por ejemplo), un 401 haría creer al
+    // cliente que su token es el problema.
+    console.error(error);
     return Response.json(
-      { error: (error as Error).message },
-      { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } },
+      { error: 'El taller no está disponible: revise que la API tenga conexión con la base de datos' },
+      { status: 503 },
     );
   }
   return manejador.fetch(req, {

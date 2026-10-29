@@ -14,4 +14,13 @@ describe('/mcp', () => {
     expect(r.headers.get('WWW-Authenticate')).toBe('Bearer');
     expect(usuarios.actorDelToken).toHaveBeenCalledWith('token', 'mcp');
   });
+
+  it('si falla la base de datos responde 503, no 401: el token no es el problema', async () => {
+    vi.mocked(usuarios.actorDelToken).mockRejectedValue(new AggregateError([], ''));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const r = await POST(peticion('/mcp', { metodo: 'POST', cuerpo: {} }));
+    expect(r.status).toBe(503);
+    expect(r.headers.get('WWW-Authenticate')).toBeNull();
+    expect((await r.json()).error).toMatch(/base de datos/);
+  });
 });
