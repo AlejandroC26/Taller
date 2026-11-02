@@ -13,7 +13,9 @@ const tarea = (cambios: Partial<TareaCotizable> = {}): TareaCotizable => ({
   garantiaValida: false,
   garantiaRespuesta: 'Desgaste normal: no lo cubre la garantía',
   pagador: 'cliente',
-  repuestos: [{ codigoRepuesto: 'PAS-DEL-CER', descripcion: 'Pastillas delanteras', cantidad: 1 }],
+  repuestos: [
+    { codigoRepuesto: 'PAS-DEL-CER', descripcion: 'Juego de pastillas delanteras cerámicas', categoria: 'Frenos', cantidad: 1 },
+  ],
   ...cambios,
 });
 
@@ -23,20 +25,35 @@ const datos = {
   taller: 'Taller Pulgas Locas',
   sede: 'Pulgas Locas Frenos',
   cliente: { cedula: '1', nombre: 'Laura', telefono: '300' },
-  vehiculo: { vin: 'V', placa: 'P', descripcion: 'Duster' },
+  vehiculo: { vin: 'V', placa: 'P', marca: 'Renault', modelo: 'Duster', anio: 2023, descripcion: 'Renault Duster 2023' },
 };
 
 describe('cotización para facturación', () => {
-  it('mano de obra con precio y repuestos solo con código y cantidad', () => {
+  it('mano de obra con precio y repuestos por código universal, sin precio', () => {
     const c = armarCotizacion(datos, [tarea()]);
     expect(c.mano_obra).toEqual([
       expect.objectContaining({ sku: 'FRE-PASTILLAS', precio: 80000, garantia: expect.objectContaining({ valida: false, pagador: 'cliente' }) }),
     ]);
     expect(c.repuestos).toEqual([
-      { tarea_id: 1, codigo_repuesto: 'PAS-DEL-CER', descripcion: 'Pastillas delanteras', cantidad: 1, garantia: expect.any(Object) },
+      {
+        tarea_id: 1,
+        codigo_repuesto: 'PAS-DEL-CER',
+        descripcion: 'Juego de pastillas delanteras cerámicas',
+        categoria: 'Frenos',
+        cantidad: 1,
+        garantia: expect.any(Object),
+      },
     ]);
     expect(c.repuestos[0]).not.toHaveProperty('precio');
     expect(c).toMatchObject({ total_mano_obra: 80000, total_mano_obra_cliente: 80000, hay_repuestos: true });
+    // La tienda busca por marca, modelo y año: van aparte de la descripción.
+    expect(c.vehiculo).toMatchObject({ marca: 'Renault', modelo: 'Duster', anio: 2023 });
+  });
+
+  it('los precios van en pesos enteros, como pide facturación', () => {
+    const c = armarCotizacion(datos, [tarea({ precio: 80000.4 }), tarea({ id: 2, precio: 59999.6, repuestos: [] })]);
+    expect(c.mano_obra.map((l) => l.precio)).toEqual([80000, 60000]);
+    expect(Number.isInteger(c.total_mano_obra)).toBe(true);
   });
 
   it('sin repuestos va solo la mano de obra', () => {

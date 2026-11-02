@@ -22,13 +22,14 @@ describe('horas de control', () => {
 });
 
 describe('partes usadas', () => {
-  it('solo código universal, cantidad y, si aplica, la línea de compra', () => {
+  it('solo el SKU de la tienda, cantidad y, si aplica, la línea de compra', () => {
     expect(parteDto.parse({ codigoRepuesto: 'pas-del-cer', cantidad: 1, compraId: 3 })).toEqual({
       codigoRepuesto: 'PAS-DEL-CER',
       cantidad: 1,
       compraId: 3,
       nota: '',
     });
-    expect(parteDto.safeParse({ codigoRepuesto: 'X', cantidad: 1 }).success).toBe(false);
+    expect(parteDto.safeParse({ codigoRepuesto: ' ', cantidad: 1 }).success).toBe(false);
+    expect(parteDto.safeParse({ codigoRepuesto: 'X'.repeat(51), cantidad: 1 }).success).toBe(false);
   });
 });

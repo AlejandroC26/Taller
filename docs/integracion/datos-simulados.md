@@ -24,6 +24,22 @@ El estado de la tabla es al 27 de octubre de 2026.
 - **Todo:** frenos, suspensión, motor, eléctrico y transmisión.
 - **Tren motriz:** motor, transmisión y eléctrico. Un reclamo de frenos en REL-1003 o REL-1007 se niega porque la garantía no cubre ese sistema.
 
+### Ficha completa (cliente y cabecera del VIN)
+
+Es lo que responden `consultar_relacion` y `decodificar_vin` simulados. El concesionario
+puede cargar estos mismos datos para que los dos sistemas coincidan.
+
+| id_relacion | Cédula | Cliente | Teléfono | Placa | VIN | Marca | Modelo | Año | Versión | Carrocería | Puertas | Motor | Combustible | Transmisión |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| REL-1001 | 1020304050 | Laura Mejía | 3015556677 | LMX201 | 9FBHJD204PM100001 | Renault | Duster | 2023 | Intens 1.3 Turbo | SUV | 5 | 1.3 L turbo | Gasolina | Automática CVT |
+| REL-1002 | 80123456 | Carlos Rojas | 3104445566 | CRB552 | 3MZBP2SM1RM200002 | Mazda | 3 | 2024 | Touring Sedán | Sedán | 4 | 2.0 L Skyactiv-G | Gasolina | Automática 6 vel. |
+| REL-1003 | 52987654 | Diana Cárdenas | 3201112233 | DCK834 | 9BWAG45U0NT300003 | Volkswagen | Gol | 2022 | Trendline | Hatchback | 5 | 1.6 L MSI | Gasolina | Manual 5 vel. |
+| REL-1004 | 1015432198 | Andrés Pardo | 3157778899 | APQ119 | KMHCT41DBMU400004 | Hyundai | Accent | 2021 | GL Coupé | Coupé | 2 | 1.6 L | Gasolina | Manual 6 vel. |
+| REL-1005 | 39765432 | Marta Gil | 3009998877 | MGL630 | 9FBHJD204LM500005 | Renault | Duster | 2020 | Intens 1.3 Turbo | SUV | 5 | 1.3 L turbo | Gasolina | Automática CVT |
+| REL-1006 | 1032456789 | Julián Ortiz | 3186665544 | JOT741 | 3MZBP2SM1SM600006 | Mazda | 3 | 2025 | Touring Sedán | Sedán | 4 | 2.0 L Skyactiv-G | Gasolina | Automática 6 vel. |
+| REL-1007 | 79456123 | Ricardo Peña | 3113332211 | RPN908 | 9BWAG45U0PT700007 | Volkswagen | Gol | 2023 | Trendline | Hatchback | 5 | 1.6 L MSI | Gasolina | Manual 5 vel. |
+| REL-1008 | 1098765432 | Sofía Vargas | 3054443322 | SVG275 | KMHCT41DBRU800008 | Hyundai | Accent | 2024 | GL Coupé | Coupé | 2 | 1.6 L | Gasolina | Manual 6 vel. |
+
 ## La API del VIN
 
 El modelo sale de los 6 primeros caracteres y el año del décimo (L = 2020 … T = 2026).
@@ -64,10 +80,12 @@ El modelo sale de los 6 primeros caracteres y el año del décimo (L = 2020 … 
 Las palabras clave de cada SKU alimentan el prediagnóstico por reglas. Se cambian con
 `registrar_servicio`.
 
-## Códigos universales de repuestos
+## Tienda simulada
 
-Son de referencia, sin precio ni existencias. Los precios los consigue facturación con las
-tiendas. Si el mecánico escribe un código que no está en la lista, igual se acepta.
+Sin `MCP_TIENDA_1_URL`, el mecánico elige de la «Tienda simulada»
+(`integraciones/tiendas/simulado/datos.ts`): 15 repuestos por código universal, con su
+categoría, marcas y unidades disponibles, en la misma forma que el catálogo de la tienda real.
+No tienen precio: lo consigue facturación.
 
 ACE-5W30-1L, FIL-ACE-STD, FIL-AIRE-STD, PAS-DEL-CER, PAS-TRA-CER, DIS-DEL-VENT,
 LIQ-FRE-DOT4, AMO-DEL-GAS, AMO-TRA-GAS, BUJ-IRI-STD, BOB-ENC-STD, BAT-12V-60AH,

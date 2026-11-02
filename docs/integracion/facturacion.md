@@ -2,14 +2,35 @@
 
 Facturación cotiza los repuestos con las tiendas, le escribe al cliente por Telegram y
 cobra con PSE. El taller **no tiene inventario ni precios de repuestos**. Envía la mano de
-obra con su precio fijo por SKU y los repuestos con su código universal y cantidad, que
-es el mismo código en todas las tiendas.
+obra con su precio fijo por SKU y los repuestos que el mecánico eligió del catálogo de la
+tienda, por **código universal** y cantidad. Con ese código facturación cotiza en la tienda
+(`consultar_precio_repuesto`) ([tiendas.md](tiendas.md)).
+
+El orden es: diagnóstico → garantía → `crear_cotizacion` → **el taller espera** a que el
+cliente responda por Telegram (`registrar_respuesta_cliente`) → si aceptó, se repara →
+`notificar_reparacion_terminada` → `registrar_pago`.
+
+## Conexión
+
+| | Facturación (grupo Zaidy) | Taller |
+|---|---|---|
+| URL | `http://10.4.16.150:3010/mcp-facturacion` | `http://10.4.16.217:3417/mcp` |
+| Token | `Bearer token_facturacion_mcp` | `Bearer` el token fijo del taller (`TALLER_MCP_TOKEN_FIJO`) |
+| Salud | `GET http://10.4.16.150:3010/salud` y panel en `/panel` | — |
+
+Los equipos están en la red APRENDIZ (10.4.16.x); las IP las da el Wi‑Fi y pueden cambiar.
 
 ## Lo que el taller llama en el MCP de facturación
 
 Se configura con `MCP_FACTURACION_URL` y `MCP_FACTURACION_TOKEN`. Sin URL, los mensajes
 quedan en la bandeja (`consultar_bandeja`). Facturación también puede leer todo con
 `consultar_cotizacion` y avanzar sin recibir nada.
+
+Las dos herramientas son **asíncronas**: facturación responde `{"recibido": true}` y la
+respuesta real llega después, con una llamada a nuestro MCP. La bandeja de salida:
+- Envía `id_mensaje = "taller-<evento>-<herramienta>"`, el mismo en cada reintento.
+- Espera hasta 90 s, porque `crear_cotizacion` tarda de 20 a 35 s en dar el acuse (facturación le pregunta a la tienda antes de responder).
+- Manda `precio` y `total_mano_obra` en pesos enteros.
 
 ### crear_cotizacion
 
@@ -30,7 +51,7 @@ trae ese texto listo para Telegram.
   "taller": "Taller Pulgas Locas",
   "sede": "Pulgas Locas Frenos y Suspensión",
   "cliente": { "cedula": "79456123", "nombre": "Ricardo Peña", "telefono": "3113332211" },
-  "vehiculo": { "vin": "9BWAG45U0PT700007", "placa": "RPN908", "descripcion": "Volkswagen Gol Trendline 2023 (Hatchback, 5 puertas)" },
+  "vehiculo": { "vin": "9BWAG45U0PT700007", "placa": "RPN908", "marca": "Volkswagen", "modelo": "Gol", "anio": 2023, "descripcion": "Volkswagen Gol Trendline 2023 (Hatchback, 5 puertas)" },
   "mano_obra": [
     {
       "tarea_id": 40,
@@ -46,6 +67,7 @@ trae ese texto listo para Telegram.
       "tarea_id": 40,
       "codigo_repuesto": "DIS-DEL-VENT",
       "descripcion": "Disco de freno delantero ventilado",
+      "categoria": "Frenos",
       "cantidad": 2,
       "garantia": { "aplica": false, "valida": false, "pagador": "cliente", "motivo": "Desgaste normal: no lo cubre la garantía" }
     }
@@ -79,7 +101,7 @@ verdad se hizo y se gastó. Con esto facturación envía el PSE.
   ],
   "servicios_no_realizados": [],
   "partes_usadas": [
-    { "codigo_repuesto": "AMO-DEL-GAS", "descripcion": "Amortiguador delantero a gas", "cantidad": 2, "compra_id": 24, "tienda": "AutoPartes La 68" }
+    { "codigo_repuesto": "AMO-DEL-GAS", "descripcion": "Amortiguador delantero a gas", "cantidad": 2, "compra_id": 24, "tienda": "Tienda de repuestos" }
   ],
   "total_mano_obra": 210000,
   "responder_con": "registrar_pago"
@@ -107,12 +129,14 @@ partes usadas.
   "aceptada": true,
   "referencia": "FAC-OT-0036",
   "orden_compra": [
-    { "codigo_repuesto": "AMO-DEL-GAS", "descripcion": "Amortiguador delantero a gas", "cantidad": 2, "tienda": "AutoPartes La 68", "precio_unitario": 288300 }
+    { "codigo_repuesto": "AMO-DEL-GAS", "cantidad": 2, "tienda": "Tienda de repuestos", "precio_unitario": 288300, "pagador": "cliente" }
   ],
   "id_mensaje": "fac-0b9d-respuesta-OT-0036"
 }
 ```
 
+- `codigo_repuesto` es el código universal de la cotización (hasta 50 caracteres). La línea se cruza con la cotización por ese código; si no trae `descripcion`, se toma la de la cotización.
+- `referencia` es la `cotizacion_ref` que generó facturación (por ejemplo `FAC-OT-0054-mvwfg7ne`). El taller la guarda y la devuelve en `notificar_reparacion_terminada`: envíenla siempre.
 - `pagador` en cada línea es opcional. Si no viene, se toma el de la línea de la cotización.
 - Si el cliente rechaza: `{ "codigo": "OT-0037", "aceptada": false, "motivo": "El cliente no aceptó el valor" }`. El vehículo sale sin reparar con `registrar_salida`.
 

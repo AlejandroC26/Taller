@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diaSemana, exigirFranjaLibre, fechaLocal, franjas } from './reglas';
+import { diaSemana, exigirFranjaLibre, fechaLocal, franjas, isoColombia } from './reglas';
 
 const horario = { dias: [1, 2, 3, 4, 5, 6], apertura: '08:00', cierre: '12:00' };
 const antes = new Date('2026-01-01T00:00:00Z');
@@ -13,6 +13,11 @@ describe('agenda de una sede', () => {
   it('pasa un instante a la fecha de Colombia', () => {
     expect(fechaLocal('2026-10-27T03:00:00Z')).toBe('2026-10-26');
     expect(fechaLocal('2026-10-27T09:00:00-05:00')).toBe('2026-10-27');
+  });
+
+  it('escribe un instante en ISO con la hora de Colombia', () => {
+    expect(isoColombia(new Date('2026-11-03T13:00:00Z'))).toBe('2026-11-03T08:00:00-05:00');
+    expect(isoColombia('2026-11-03T02:30:00Z')).toBe('2026-11-02T21:30:00-05:00');
   });
 
   it('arma franjas de una hora dentro del horario con el cupo de mecánicos', () => {

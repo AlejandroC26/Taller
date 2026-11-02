@@ -20,7 +20,7 @@ Concesionario ──► Taller S.A.S. ──► Facturación ──► Tiendas
 3. El mecánico **toma** la orden y la **diagnostica**. Registra:
    - Servicios por SKU, con precio fijo de mano de obra.
    - La causa de la falla y su dictamen de garantía, con evidencias.
-   - Los repuestos que hay que comprar, por código universal y **sin precio**: el taller no tiene inventario.
+   - Los repuestos que hay que comprar, elegidos del catálogo de las tiendas para ese vehículo y **sin precio**: el taller no tiene inventario.
 4. El concesionario **valida la garantía** de cada orden.
 5. Facturación **cotiza** con las tiendas, le avisa al cliente por Telegram y, si acepta, devuelve la orden de compra.
 6. El mecánico **repara**: horas de control, servicios hechos y partes usadas.
@@ -38,7 +38,7 @@ Concesionario ──► Taller S.A.S. ──► Facturación ──► Tiendas
 
 | Parte | Stack |
 |---|---|
-| `api/` | Next.js 16 (solo rutas API) + TypeORM + PostgreSQL + zod, puerto 3001 |
+| `api/` | Next.js 16 (solo rutas API) + TypeORM + PostgreSQL + zod, puerto 3417 |
 | `web/` | React 19 + Vite + Tailwind CSS 4, puerto 5173: la parte manual del mecánico |
 | MCP | Servidor MCP en `/mcp`: `outputSchema`, `id_mensaje` idempotente, `siguiente_paso` y recursos `taller://…` |
 

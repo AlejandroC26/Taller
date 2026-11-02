@@ -102,7 +102,6 @@ describe('reparación', () => {
       rutas: {
         '/api/ordenes/OT-0001/reparacion': rep,
         '/api/ordenes/OT-0001': o,
-        '/api/codigos-repuesto': [{ codigo: 'PAS-DEL-CER', descripcion: 'Pastillas delanteras cerámicas', sistema: 'frenos' }],
         ...extra,
       },
     });
@@ -147,7 +146,7 @@ describe('reparación', () => {
       'POST /api/ordenes/OT-0001/reparacion/partes': reparacion(),
     });
     await userEvent.click(await screen.findByRole('button', { name: 'Usada' }));
-    expect(screen.getByLabelText('Código universal')).toHaveValue('PAS-DEL-CER');
+    expect(screen.getByLabelText('SKU de la tienda')).toHaveValue('PAS-DEL-CER');
     await userEvent.click(screen.getByRole('button', { name: 'Registrar parte usada' }));
     await waitFor(() =>
       expect(llamadas.find((l) => l.metodo === 'POST' && l.url.endsWith('/partes'))?.cuerpo).toEqual({
@@ -165,10 +164,11 @@ describe('reparación', () => {
       'POST /api/ordenes/OT-0001/reparacion/partes': reparacion(),
     });
     expect(await screen.findByText('Sin repuestos que comprar: solo mano de obra')).toBeInTheDocument();
-    await userEvent.type(screen.getByLabelText('Código universal'), 'pas-del-cer');
-    expect(screen.getByLabelText('Descripción')).toHaveValue('Pastillas delanteras cerámicas');
+    await userEvent.type(screen.getByLabelText('SKU de la tienda'), 'pas-del-cer');
+    // Sin orden de compra no hay sugerencia: la API toma la descripción del diagnóstico.
+    expect(screen.getByLabelText('Descripción')).toHaveValue('');
     await userEvent.click(screen.getByRole('button', { name: 'Registrar parte usada' }));
-    await waitFor(() => expect(llamadas.find((l) => l.url.endsWith('/partes'))?.cuerpo).not.toHaveProperty('compraId'));
+    await waitFor(() => expect(llamadas.find((l) => l.url.endsWith('/partes'))?.cuerpo).toEqual({ codigoRepuesto: 'PAS-DEL-CER', cantidad: 1, nota: '' }));
   });
 
   it('un mecánico no asignado a la reparación solo la consulta', async () => {

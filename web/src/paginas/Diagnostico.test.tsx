@@ -1,12 +1,30 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { CodigoRepuesto, Diagnostico, Sede, Servicio, ServicioDiagnostico } from '../api/tipos';
+import type { BusquedaRepuestos, Diagnostico, Sede, Servicio, ServicioDiagnostico } from '../api/tipos';
 import { actorDe, catalogo as catalogoPrueba, diagnostico, orden, renderizar, sede, sedeFrenos, servicioDiagnostico } from '../pruebas/utilidades';
 import { aCuerpo, aFormulario, DiagnosticoPagina, EditorDiagnostico } from './Diagnostico';
+import type { FiltroRepuestos } from './Diagnostico';
 
 const catalogo = catalogoPrueba as Servicio[];
-const codigos: CodigoRepuesto[] = [{ codigo: 'PAS-DEL-CER', descripcion: 'Pastillas delanteras cerámicas', sistema: 'frenos' }];
+const busqueda = (cambios: Partial<BusquedaRepuestos> = {}): BusquedaRepuestos => ({
+  orden: 'OT-0001',
+  tiendas: ['Tienda de repuestos'],
+  sin_respuesta: [],
+  actualizado_en: '2026-10-31T19:00:00.000Z',
+  categorias: ['Frenos', 'Suspensión'],
+  repuestos: [
+    {
+      codigo_repuesto: 'PAS-DEL-CER',
+      nombre: 'Juego de pastillas delanteras cerámicas',
+      categoria: 'Frenos',
+      marcas: ['Bosch', 'Brembo'],
+      unidades_disponibles: 1,
+      tiendas: ['Tienda de repuestos'],
+    },
+  ],
+  ...cambios,
+});
 const diag = (cambios: Record<string, unknown> = {}) => diagnostico(cambios) as Diagnostico;
 const servicio = (cambios: Record<string, unknown> = {}) => servicioDiagnostico(cambios) as ServicioDiagnostico;
 
@@ -16,8 +34,9 @@ function editor(props: Partial<Parameters<typeof EditorDiagnostico>[0]> = {}) {
     alFinalizar: vi.fn(async () => undefined),
     alRemitir: vi.fn(async () => undefined),
     alSubir: vi.fn(async () => ({ id: 7, nombre: 'foto.jpg', tipo: 'jpg', url: '/api/evidencias/7' })),
+    buscarRepuestos: vi.fn(async (_filtro: FiltroRepuestos) => busqueda()),
   };
-  render(<EditorDiagnostico inicial={diag()} catalogo={catalogo} codigos={codigos} sedesRemision={[]} {...funciones} {...props} />);
+  render(<EditorDiagnostico inicial={diag()} catalogo={catalogo} sedesRemision={[]} {...funciones} {...props} />);
   return { ...funciones, ...props };
 }
 
@@ -81,24 +100,45 @@ describe('editor del diagnóstico', () => {
     await waitFor(() => expect(f.alSubir).toHaveBeenCalledWith(null, expect.any(File)));
   });
 
-  it('los repuestos van con código universal y cantidad, sin precio', async () => {
+  it('el repuesto se elige del catálogo de la tienda por código universal, sin precio', async () => {
     const f = editor();
     await userEvent.selectOptions(screen.getByLabelText('Servicio (SKU)'), 'FRE-PAST-DEL');
     await userEvent.click(screen.getByRole('button', { name: '+ Repuesto' }));
-    await userEvent.type(screen.getByLabelText('Código universal'), 'pas-del-cer');
-    expect(screen.getByLabelText('Descripción')).toHaveValue('Pastillas delanteras cerámicas');
+    // Al abrir se carga el catálogo completo.
+    await waitFor(() => expect(f.buscarRepuestos).toHaveBeenCalledWith({ texto: '', categoria: '' }));
+    await userEvent.selectOptions(await screen.findByLabelText('Categoría'), 'Frenos');
+    expect(f.buscarRepuestos).toHaveBeenLastCalledWith({ texto: '', categoria: 'Frenos' });
+    await userEvent.type(screen.getByLabelText('Buscar repuesto'), 'pastillas');
+    await userEvent.click(screen.getByRole('button', { name: 'Buscar en la tienda' }));
+    expect(f.buscarRepuestos).toHaveBeenLastCalledWith({ texto: 'pastillas', categoria: 'Frenos' });
+    const tabla = await screen.findByRole('table');
+    expect(within(tabla).getByText('Bosch, Brembo')).toBeInTheDocument();
+    expect(within(tabla).queryByText(/\$/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Agregar Juego de pastillas delanteras cerámicas' }));
+    // Elegirlo otra vez suma una unidad en la misma línea; pasa de lo disponible y lo avisa.
+    await userEvent.click(screen.getByRole('button', { name: 'Agregar Juego de pastillas delanteras cerámicas' }));
+    const elegidos = screen.getByRole('list', { name: 'Repuestos del servicio 1' });
+    expect(within(elegidos).getByText('PAS-DEL-CER')).toBeInTheDocument();
+    expect(within(elegidos).getByLabelText('Cantidad')).toHaveValue(2);
+    expect(within(elegidos).getByText(/La tienda tiene 1 disponibles/)).toBeInTheDocument();
     expect(screen.getByText('1 por cotizar')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Guardar borrador' }));
     await waitFor(() => expect(f.alGuardar).toHaveBeenCalled());
-    expect(f.alGuardar).toHaveBeenCalledWith(
-      {
-        observaciones: '',
-        tareas: [
-          { sku: 'FRE-PAST-DEL', descripcion: '', causa: null, garantiaAplica: false, garantiaMotivo: '', repuestos: [{ codigoRepuesto: 'PAS-DEL-CER', descripcion: 'Pastillas delanteras cerámicas', cantidad: 1 }] },
-        ],
-      },
-    );
+    expect(f.alGuardar).toHaveBeenCalledWith({
+      observaciones: '',
+      tareas: [{ sku: 'FRE-PAST-DEL', descripcion: '', causa: null, garantiaAplica: false, garantiaMotivo: '', repuestos: [{ codigoRepuesto: 'PAS-DEL-CER', cantidad: 2 }] }],
+    });
     expect(await screen.findByText('Borrador guardado.')).toBeInTheDocument();
+  });
+
+  it('si la tienda no respondió avisa que es el último catálogo y permite actualizar', async () => {
+    const buscarRepuestos = vi.fn(async (filtro: FiltroRepuestos) => busqueda(filtro.refrescar ? {} : { sin_respuesta: ['Tienda de repuestos'] }));
+    editor({ buscarRepuestos });
+    await userEvent.click(screen.getByRole('button', { name: '+ Repuesto' }));
+    expect(await screen.findByText(/No respondió: Tienda de repuestos/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+    await waitFor(() => expect(buscarRepuestos).toHaveBeenLastCalledWith({ texto: '', categoria: '', refrescar: true }));
+    expect(await screen.findByText(/Catálogo de las/)).toBeInTheDocument();
   });
 
   it('finalizar guarda primero y luego finaliza; un error se muestra', async () => {
@@ -123,16 +163,41 @@ describe('editor del diagnóstico', () => {
 
 describe('conversión del formulario', () => {
   it('aFormulario deja fuera las tareas fijas', () => {
-    const f = aFormulario([servicio({ id: 1, fija: true }), servicio({ id: 2, causa: 'desgaste_normal', repuestos: [{ id: 3, codigo_repuesto: 'X-1', descripcion: 'X', cantidad: 2 }] })]);
+    const f = aFormulario([
+      servicio({ id: 1, fija: true }),
+      servicio({
+        id: 2,
+        causa: 'desgaste_normal',
+        repuestos: [{ id: 3, codigo_repuesto: 'PAS-DEL-CER', descripcion: 'Pastillas', categoria: 'Frenos', cantidad: 2 }],
+      }),
+    ]);
     expect(f).toHaveLength(1);
-    expect(f[0]).toMatchObject({ id: 2, causa: 'desgaste_normal', repuestos: [{ codigo: 'X-1', cantidad: '2' }] });
+    expect(f[0]).toMatchObject({ id: 2, causa: 'desgaste_normal', repuestos: [{ codigo: 'PAS-DEL-CER', nombre: 'Pastillas', categoria: 'Frenos', cantidad: '2' }] });
   });
 
-  it('aCuerpo: sin causa no hay dictamen, y omite repuestos sin código', () => {
+  it('aCuerpo: sin causa no hay dictamen, y el repuesto va solo con código y cantidad', () => {
     const cuerpo = aCuerpo(' ok ', [
-      { clave: 'a', id: 4, sku: 'FRE-PAST-DEL', descripcion: ' cambio ', causa: '', aplica: true, motivo: ' ', repuestos: [{ clave: 'r', codigo: '', descripcion: '', cantidad: '1' }], evidencias: [] },
+      {
+        clave: 'a',
+        id: 4,
+        sku: 'FRE-PAST-DEL',
+        descripcion: ' cambio ',
+        causa: '',
+        aplica: true,
+        motivo: ' ',
+        repuestos: [{ clave: 'r', codigo: 'PAS-DEL-CER', nombre: 'Pastillas', categoria: 'Frenos', cantidad: '3' }],
+        evidencias: [],
+      },
     ]);
-    expect(cuerpo.tareas[0]).toEqual({ id: 4, sku: 'FRE-PAST-DEL', descripcion: 'cambio', causa: null, garantiaAplica: false, garantiaMotivo: '', repuestos: [] });
+    expect(cuerpo.tareas[0]).toEqual({
+      id: 4,
+      sku: 'FRE-PAST-DEL',
+      descripcion: 'cambio',
+      causa: null,
+      garantiaAplica: false,
+      garantiaMotivo: '',
+      repuestos: [{ codigoRepuesto: 'PAS-DEL-CER', cantidad: 3 }],
+    });
   });
 });
 
@@ -147,7 +212,7 @@ describe('página del diagnóstico', () => {
         '/api/ordenes/OT-0001/diagnostico': d,
         '/api/ordenes/OT-0001': o,
         '/api/servicios': catalogo,
-        '/api/codigos-repuesto': codigos,
+        '/api/ordenes/OT-0001/repuestos-tienda': busqueda(),
         '/api/talleres': [sede(), sedeFrenos()],
       },
     });

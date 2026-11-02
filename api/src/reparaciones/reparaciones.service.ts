@@ -5,12 +5,13 @@ import { invalido, noEncontrado } from '../comun/errores';
 import { CompraRepuesto } from '../cotizaciones/compra.entity';
 import { manoObraRealizada } from '../cotizaciones/reglas';
 import { buscarDiagnostico } from '../diagnosticos/diagnosticos.service';
+import { Repuesto } from '../diagnosticos/repuesto.entity';
 import { Tarea } from '../diagnosticos/tarea.entity';
 import { avisarDespacho, encolar } from '../integraciones/bandeja';
 import { asignadoA, cargarOrden, nombreDe, siguientePaso, transicionar } from '../ordenes/ordenes.service';
 import type { Orden } from '../ordenes/orden.entity';
 import { codigoOrden, esGestion, exigirTrabajo } from '../ordenes/reglas';
-import { catalogoServicios, descripcionRepuesto } from '../servicios/servicios.service';
+import { catalogoServicios } from '../servicios/servicios.service';
 import type { Actor } from '../usuarios/actor';
 import type { DatosHoras, DatosParte } from './dto';
 import { ParteUsada } from './parte-usada.entity';
@@ -146,8 +147,11 @@ export async function registrarParteUsada(actor: Actor, codigo: string, datos: D
       compra = await tx.findOne(CompraRepuesto, { where: { id: datos.compraId, orden: { id: orden.id } } });
       if (!compra) throw invalido('Esa línea no es de la orden de compra de esta orden');
     }
-    const descripcion = datos.descripcion || compra?.descripcion || (await descripcionRepuesto(datos.codigoRepuesto));
-    if (!descripcion) throw invalido(`Describa el repuesto ${datos.codigoRepuesto}: no está en el catálogo de códigos`);
+    const pedido = compra
+      ? null
+      : await tx.findOne(Repuesto, { where: { codigoRepuesto: datos.codigoRepuesto, tarea: { diagnostico: { orden: { id: orden.id } } } } });
+    const descripcion = datos.descripcion || compra?.descripcion || pedido?.descripcion;
+    if (!descripcion) throw invalido(`Describa el repuesto ${datos.codigoRepuesto}: no está en el diagnóstico ni en la orden de compra`);
     await tx.save(
       tx.create(ParteUsada, {
         reparacion,
@@ -190,7 +194,7 @@ export async function terminarReparacion(actor: Actor, codigo: string) {
       cotizacion_ref: orden.cotizacionRef,
       mano_obra_realizada: tareas
         .filter((t) => t.completada)
-        .map((t) => ({ tarea_id: t.id, sku: t.servicioSku, descripcion: t.servicioNombre, precio: t.precio, pagador: t.pagador })),
+        .map((t) => ({ tarea_id: t.id, sku: t.servicioSku, descripcion: t.servicioNombre, precio: Math.round(t.precio), pagador: t.pagador })),
       servicios_no_realizados: propias
         .filter((t) => !t.completada)
         .map((t) => ({ tarea_id: t.id, sku: t.servicioSku, descripcion: t.servicioNombre })),
@@ -201,7 +205,7 @@ export async function terminarReparacion(actor: Actor, codigo: string) {
         compra_id: p.compra?.id ?? null,
         tienda: p.compra?.tienda ?? null,
       })),
-      total_mano_obra: total,
+      total_mano_obra: Math.round(total),
       responder_con: 'registrar_pago',
     });
   });

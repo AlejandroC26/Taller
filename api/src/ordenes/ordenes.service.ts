@@ -2,7 +2,7 @@ import { In } from 'typeorm';
 import type { EntityManager } from 'typeorm';
 import { z } from 'zod';
 import { bd } from '../base-datos/conexion';
-import { conflicto, invalido, noEncontrado, prohibido } from '../comun/errores';
+import { conflicto, invalido, noDisponible, noEncontrado, prohibido } from '../comun/errores';
 import { manoObraRealizada } from '../cotizaciones/reglas';
 import { Diagnostico } from '../diagnosticos/diagnostico.entity';
 import { avisarDespacho, encolar } from '../integraciones/bandeja';
@@ -11,7 +11,7 @@ import type { Prediagnostico } from '../prediagnostico/reglas';
 import { aRelacion, descripcionVehiculo, obtenerRelacion } from '../relaciones/relaciones.service';
 import { Reparacion } from '../reparaciones/reparacion.entity';
 import { catalogoServicios } from '../servicios/servicios.service';
-import { exigirFranjaLibre, fechaLocal } from '../talleres/reglas';
+import { exigirFranjaLibre, fechaLocal, isoColombia } from '../talleres/reglas';
 import { aTaller, buscarTaller, disponibilidad } from '../talleres/talleres.service';
 import { Taller } from '../talleres/taller.entity';
 import type { Actor } from '../usuarios/actor';
@@ -93,7 +93,8 @@ export const aOrden = (o: Orden) => ({
   sede: aTaller(o.taller),
   remitida_desde: o.remitidaDesde ? { codigo: o.remitidaDesde.codigo, nombre: o.remitidaDesde.nombre, nota: o.notaRemision } : null,
   ...aRelacion(o.relacion),
-  fecha_cita: o.fechaCita,
+  // En hora de Colombia (-05:00), como la pidió el concesionario.
+  fecha_cita: o.fechaCita ? isoColombia(o.fechaCita) : null,
   kilometraje: o.kilometraje,
   mensajes_cliente: o.mensajesCliente,
   sintomas: o.sintomas,
@@ -208,17 +209,35 @@ export async function prediagnosticoDe(textos: string[], vehiculo: string): Prom
   return prediagnosticar(textos, vehiculo, await catalogoServicios(), await sedesCatalogo());
 }
 
-export async function consultarPrediagnostico(datos: z.infer<typeof prediagnosticarDto>) {
+// El concesionario espera hasta 60 s. Si algo se demora más (el concesionario real, la
+// base), es mejor un error claro que un corte de conexión.
+export const PLAZO_PREDIAGNOSTICO_MS = 45_000;
+
+export async function consultarPrediagnostico(datos: z.infer<typeof prediagnosticarDto>, plazoMs = PLAZO_PREDIAGNOSTICO_MS) {
+  let reloj: ReturnType<typeof setTimeout> | undefined;
+  const vencido = new Promise<never>((_, rechazar) => {
+    reloj = setTimeout(() => rechazar(noDisponible('No se pudo calcular el prediagnóstico a tiempo, intente de nuevo')), plazoMs);
+  });
+  try {
+    return await Promise.race([armarPrediagnostico(datos), vencido]);
+  } finally {
+    clearTimeout(reloj);
+  }
+}
+
+async function armarPrediagnostico(datos: z.infer<typeof prediagnosticarDto>) {
   const relacion = await obtenerRelacion(datos.idRelacion);
   const pre = await prediagnosticoDe(textoMensajes(datos.mensajesCliente), descripcionVehiculo(relacion));
   const servicios = (await catalogoServicios()).filter((s) => pre.servicios.includes(s.sku));
+  // La sede completa, con su ubicación, para que el concesionario se la muestre al cliente.
+  const sede = pre.taller ? aTaller(await buscarTaller(pre.taller.id)) : null;
   return {
     id_relacion: relacion.idRelacion,
     vehiculo: descripcionVehiculo(relacion),
     garantia: relacion.garantia,
     ...pre,
     servicios_probables: servicios.map((s) => ({ sku: s.sku, nombre: s.nombre, precio_mano_obra: s.precioManoObra })),
-    sede_sugerida: pre.taller ?? null,
+    sede_sugerida: sede,
     siguiente_paso: {
       responsable: 'concesionario',
       descripcion:
@@ -239,6 +258,10 @@ export async function agendarCita(actor: Actor, datos: z.infer<typeof citaDto>) 
   const sede = datos.taller !== undefined ? await buscarTaller(datos.taller) : pre.taller ? await buscarTaller(pre.taller.id) : null;
   if (!sede) throw invalido('No hay sedes activas para agendar');
   if (!sede.activo) throw invalido(`La sede ${sede.nombre} no está activa`);
+  // Antes que la franja: si el vehículo ya tiene una orden abierta, ese es el motivo que el
+  // cliente debe oír (dentro de la transacción se vuelve a revisar, por si llegan dos a la vez).
+  const yaAbierta = await db.getRepository(Orden).findOne({ where: { relacion: { idRelacion: relacion.idRelacion }, estado: In([...ABIERTOS]) } });
+  if (yaAbierta) throw conflicto(`El vehículo ya tiene la orden ${codigoOrden(yaAbierta.id)} abierta`);
   const { franjas } = await disponibilidad(sede.id, fechaLocal(datos.fechaHora));
   exigirFranjaLibre(franjas, datos.fechaHora);
 

@@ -10,6 +10,7 @@ import {
   cuenta,
   despejarRelacion,
   entrarAdmin,
+  facturacionReal,
   fallar,
   fallidas,
   gris,
@@ -89,6 +90,12 @@ try {
   paso('5. Diagnóstico del especialista con evidencia (REST, mec-frenos)');
   r = await como('mec-frenos', `/api/ordenes/${codigo}/tomar`, { metodo: 'POST' });
   revisar(r.json?.estado === 'en_diagnostico', 'el especialista la toma');
+  // El repuesto se elige del catálogo de la tienda, por código universal.
+  revisar((await como('mec-motor', `/api/ordenes/${codigo}/repuestos-tienda?texto=amortiguador`)).estado === 404, 'otro mecánico no busca repuestos para ella: 404');
+  r = await como('mec-frenos', `/api/ordenes/${codigo}/repuestos-tienda?texto=amortiguador`);
+  const amortiguador = r.json?.repuestos?.find((x) => x.codigo_repuesto === 'AMO-DEL-GAS');
+  revisar(r.estado === 200 && amortiguador && r.json.categorias?.length, `la tienda tiene AMO-DEL-GAS (${amortiguador?.unidades_disponibles} disponibles)`, r.json);
+  revisar(!JSON.stringify(r.json ?? {}).includes('precio'), 'la búsqueda no trae precios');
   const cuerpo = {
     observaciones: 'Prueba de punta a punta',
     tareas: [
@@ -128,7 +135,12 @@ try {
   const cot = await llamar('agente-facturacion', 'consultar_cotizacion', { codigo });
   revisar(JSON.stringify(cot.mano_obra.map((l) => l.sku)) === JSON.stringify(['REV-GENERAL', 'SUS-AMORT']), 'cobra la revisión general y la especialidad');
   revisar(cot.repuestos.length === 1 && !('precio' in cot.repuestos[0]), 'los repuestos van sin precio');
+  revisar(cot.repuestos[0]?.codigo_repuesto === 'AMO-DEL-GAS', 'la cotización lleva el código universal');
   console.log(gris(`    Telegram al cliente: «${cot.mensaje_garantia}»`));
+  if (await facturacionReal()) {
+    console.log(gris(`    facturación es la real: ${codigo} queda en_cotizacion hasta que el cliente responda por Telegram`));
+    throw new Error('Se detuvo esperando a facturación real');
+  }
   orden = await llamar('agente-facturacion', 'registrar_respuesta_cliente', {
     codigo,
     aceptada: true,

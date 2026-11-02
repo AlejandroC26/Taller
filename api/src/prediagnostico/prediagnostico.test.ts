@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { prediagnosticar } from './agente';
+import { prediagnosticar, tiempoModeloMs } from './agente';
 import { decidirRuta, elegirSede, porPalabrasClave, validarSalidaModelo } from './reglas';
 import type { SedeCatalogo, ServicioCatalogo } from './reglas';
 
@@ -60,6 +60,14 @@ describe('prediagnóstico por reglas', () => {
 });
 
 describe('agente de prediagnóstico', () => {
+  it('espera al modelo 8 s por defecto; LOCAL_TIEMPO_MS lo cambia dentro de 1 a 50 s', () => {
+    expect(tiempoModeloMs({})).toBe(8_000);
+    expect(tiempoModeloMs({ LOCAL_TIEMPO_MS: '15000' })).toBe(15_000);
+    expect(tiempoModeloMs({ LOCAL_TIEMPO_MS: '10' })).toBe(1_000);
+    expect(tiempoModeloMs({ LOCAL_TIEMPO_MS: '999999' })).toBe(50_000);
+    expect(tiempoModeloMs({ LOCAL_TIEMPO_MS: 'abc' })).toBe(8_000);
+  });
+
   it('usa la respuesta del modelo cuando es válida y segura', async () => {
     const modelo = vi.fn(async (_sistema: string, _usuario: string) => ({ especialidad: 'frenos', servicios: ['FRE-DISCOS'], confianza: 0.85, resumen: 'Vibración al frenar: discos' }));
     const r = await prediagnosticar(['el pedal vibra'], 'Mazda 3', catalogo, sedes, modelo);

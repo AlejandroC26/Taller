@@ -7,7 +7,7 @@
 Es una pieza de un ecosistema de **agentes** que se hablan por MCP:
 - El **concesionario** es dueño de la relación cliente–vehículo (`id_relacion`), de la API del VIN y de la garantía. Agenda las citas y valida la garantía.
 - **Facturación** cotiza los repuestos con las tiendas, le escribe al cliente por Telegram y cobra con PSE.
-- Las **tiendas** venden las partes. El taller **no tiene inventario**: solo dice qué parte hace falta (código universal y cantidad) y registra lo que usó.
+- Las **tiendas** venden las partes. El taller **no tiene inventario**: el mecánico elige la parte del catálogo de la tienda por **código universal** (PAS-DEL-CER…), el taller guarda código, nombre, categoría y cantidad, sin precio, y registra lo que usó.
 
 Lo central es el **MCP**. La web es solo la **parte manual del mecánico**:
 - Tomar la orden.
@@ -34,9 +34,9 @@ El contrato con los otros agentes, con ejemplos JSON reales, está en
 
 | Parte | Tecnología | Puerto |
 |---|---|---|
-| `api/` | Next.js 16 (App Router, solo rutas API) + TypeORM 1 + PostgreSQL 18 + zod 4 + jose | 3001 |
-| `web/` | React 19 + Vite 8 + Tailwind CSS 4 + React Router 8 | 5173 (reenvía `/api` y `/mcp` a 3001) |
-| MCP | `@modelcontextprotocol/server` 2 (Streamable HTTP en `/mcp`) | 3001 |
+| `api/` | Next.js 16 (App Router, solo rutas API) + TypeORM 1 + PostgreSQL 18 + zod 4 + jose | 3417 |
+| `web/` | React 19 + Vite 8 + Tailwind CSS 4 + React Router 8 | 5173 (reenvía `/api` y `/mcp` a 3417) |
+| MCP | `@modelcontextprotocol/server` 2 (Streamable HTTP en `/mcp`) | 3417 |
 | Prediagnóstico | Modelo local compatible con OpenAI (`LOCAL_URL`, Ollama), con reglas de respaldo | — |
 | Pruebas | Vitest 5 en los dos proyectos; Testing Library + jsdom en `web` | — |
 
@@ -56,7 +56,7 @@ docker compose exec postgres createdb -U <DB_USUARIO> taller
 npm install
 npm run migracion:correr      # aplica las migraciones
 npm run semilla               # roles, sedes, catálogo de SKU, códigos de repuesto y el administrador
-npm run dev                   # http://localhost:3001
+npm run dev                   # http://localhost:3417
 npm run pruebas               # pruebas unitarias (sin base de datos)
 npm run tipos                 # tsc --noEmit
 npm run simular -- todos      # los 11 casos por MCP, como un orquestador (npm run simular -- casos los lista)
@@ -76,7 +76,7 @@ npm run build                 # tsc + vite build
 ```
 api/
   app/api/**/route.ts     Rutas delgadas: validan con zod (dto.ts) y llaman al service. Solo las que usa la
-                          web: auth, usuarios, talleres, servicios, codigos-repuesto, ordenes (tomar, remitir,
+                          web: auth, usuarios, talleres, servicios, ordenes (tomar, remitir, repuestos-tienda,
                           evidencias, diagnostico, reparacion), evidencias/:id.
   app/mcp/route.ts        Puerta MCP: exige el token de audiencia 'mcp'.
   prompts/                prediagnostico.txt (instrucciones del agente de prediagnóstico)
@@ -87,7 +87,7 @@ api/
                           fuente.ts (CLI de migraciones), semilla.ts, migraciones/
   src/usuarios/           Rol y Usuario (con sede), claves (scrypt), tokens (jose), actor, service, dto
   src/talleres/           Taller (sede); reglas.ts (franjas libres, zona horaria -05:00)
-  src/servicios/          Servicio (SKU con precio fijo) y CodigoRepuesto (código universal, sin precio)
+  src/servicios/          Servicio (SKU con precio fijo)
   src/relaciones/         RelacionVehiculo: copia local de lo que el concesionario dice del id_relacion
   src/prediagnostico/     agente.ts (modelo local → JSON) y reglas.ts (palabras clave, ruta, sede)
   src/ordenes/            Orden, Asignacion; reglas.ts (estados, PASOS, quién ve qué); service (citas, cola,
@@ -101,7 +101,9 @@ api/
                           mensaje de garantía); service (cotización, respuesta del cliente, pago)
   src/reparaciones/       Reparacion, RegistroHoras, ParteUsada; reglas.ts (horas, eficiencia)
   src/integraciones/      Bandeja de salida (evento.entity, bandeja, despachador), conector MCP, contrato.ts,
-                          idempotencia.ts (unaVez + mensajes_recibidos), concesionario/ (proveedor simulado o MCP)
+                          idempotencia.ts (unaVez + mensajes_recibidos), concesionario/ (proveedor simulado o MCP),
+                          tiendas/ (catálogo de la tienda por su agente, guardado 5 min, o la tienda simulada;
+                          descarta el precio)
   src/mcp/                herramientas.ts (servidor por petición; herramientasDe(rol)), flujo.ts (recursos)
   pruebas/                simular.mjs (casos), flujo.mjs (punta a punta REST), agentes.mjs (usuarios y
                           clientes MCP compartidos), entrar.mjs, probar-mcp.mjs, comun.mjs
@@ -147,7 +149,7 @@ web/src/
   - Un service nunca llama directo a otro agente. Escribe con `encolar(tx, destino, herramienta, datos)` dentro de su transacción y después llama `avisarDespacho()`.
   - La única excepción es el concesionario: se consulta en línea con `concesionario()` (relación, VIN y garantía). Es el simulado si no hay `MCP_CONCESIONARIO_URL`.
 - **Idempotencia**: toda herramienta MCP que cambia algo acepta `id_mensaje` y se envuelve con `unaVez(id_mensaje, herramienta, fn)`.
-- **Sin inventario**: no hay existencias, precios de repuestos ni tiendas en el taller. Los repuestos se piden por código universal y cantidad; las partes usadas solo se registran.
+- **Sin inventario**: no hay existencias ni precios de repuestos en el taller. El mecánico elige el repuesto del catálogo de la tienda (`tiendas().catalogo()`, en línea como el concesionario) por código universal, y se guarda sin precio: código, nombre, categoría y cantidad. Un código que no está en el catálogo responde 400. Las partes usadas solo se registran.
 
 ## Reglas de dominio
 
@@ -181,6 +183,8 @@ web/src/
     - `especializada`: confianza ≥ 0,6 y hay sede con esa especialidad.
     - `revision_general`: si no, va a mantenimiento.
 - Si el modelo no responde o sale del catálogo, se usan las palabras clave del SKU (`fuente: 'reglas'`).
+- **Tiempo:** el modelo tiene `LOCAL_TIEMPO_MS` (8 s por defecto) y la herramienta completa `PLAZO_PREDIAGNOSTICO_MS` (45 s); si se pasa, `isError` con «No se pudo calcular el prediagnóstico a tiempo, intente de nuevo». El concesionario llama mientras el cliente espera en el chat: nunca debe quedar colgado.
+- `fecha_cita` sale en ISO 8601 con `-05:00` (`isoColombia`); `prediagnosticar` y `agendar_cita` publican su `outputSchema` completo (`SALIDA_PREDIAGNOSTICO`, `SALIDA_CITA`).
 
 **Costos:**
 - **Mano de obra** = Σ precio fijo del SKU de cada servicio. La revisión general se cobra junto con la especialidad.
@@ -284,6 +288,12 @@ La web usa el sistema «ClickUp» de `DESIGN.md`: tema claro, tipografía pesada
 se crea un servidor por petición. `herramientasDe(rol)` da **todas** las herramientas al
 `agente` y al administrador, y al mecánico solo las suyas.
 
+**Token fijo del ejercicio:** para que cualquier equipo se conecte sin iniciar sesión, `/mcp`
+acepta también el token fijo del usuario `agente-compartido` (rol `agente`, sin vencimiento).
+- Se guarda en `usuarios.token_mcp_fijo`. Sale de `TALLER_MCP_TOKEN_FIJO` y lo aplica `npm run semilla`; si la variable no está, se conserva el que había o se crea uno (`pl-mcp-…`). La semilla lo imprime.
+- `actorDelToken` lo busca solo en el MCP y solo si el token no es un JWT (`pareceJwt`). La API REST y la web siguen pidiendo su JWT.
+- Para cortarlo, desactive `agente-compartido` en Usuarios: la semilla no lo reactiva.
+
 **Herramientas** (agrupadas por quién las usa normalmente):
 
 | Grupo | Herramientas |
@@ -291,7 +301,7 @@ se crea un servidor por petición. `herramientasDe(rol)` da **todas** las herram
 | Orquestador | `describir_flujo`, `estado_orden`, `listar_ordenes` |
 | Concesionario | `listar_talleres`, `prediagnosticar`, `consultar_disponibilidad`, `agendar_cita`, `cancelar_cita` (`destructiveHint`), `consultar_evidencias`, `registrar_resultado_garantia` |
 | Facturación | `consultar_cotizacion`, `registrar_respuesta_cliente`, `registrar_pago` |
-| Mecánico | `mis_ordenes`, `tomar_orden`, `consultar_diagnostico`, `registrar_diagnostico`, `adjuntar_evidencia` (base64), `remitir_orden`, `finalizar_diagnostico`, `consultar_reparacion`, `registrar_horas`, `registrar_parte_usada`, `marcar_tarea`, `terminar_reparacion`, `consultar_servicios`, `buscar_codigos_repuesto` |
+| Mecánico | `mis_ordenes`, `tomar_orden`, `consultar_diagnostico`, `registrar_diagnostico`, `adjuntar_evidencia` (base64), `remitir_orden`, `finalizar_diagnostico`, `consultar_reparacion`, `registrar_horas`, `registrar_parte_usada`, `marcar_tarea`, `terminar_reparacion`, `consultar_servicios`, `buscar_repuestos_tienda` |
 | Administración | `registrar_taller`, `actualizar_taller`, `registrar_servicio`, `registrar_salida`, `consultar_bandeja`, `reintentar_envios` |
 
 **Recursos:**
@@ -329,6 +339,11 @@ El contrato está en `api/src/integraciones/contrato.ts`, con ejemplos en `docs/
 | concesionario | `notificar_estado_vehiculo { codigo, id_relacion, placa, sede, estado, nota, fecha }` | En cada cambio de estado |
 | facturacion | `crear_cotizacion { …, mano_obra[] con precio, repuestos[] sin precio, mensaje_garantia }` | Al validar la garantía; responde con `registrar_respuesta_cliente` |
 | facturacion | `notificar_reparacion_terminada { mano_obra_realizada[], partes_usadas[], total_mano_obra }` | Al terminar la reparación; responde con `registrar_pago` |
+| tiendas | `hablar_con_repuestos { mensaje }` (su agente; la respuesta trae `catalogo`) | En línea, cuando el mecánico busca repuestos; se guarda 5 minutos |
+
+La bandeja envía a cada destino `id_mensaje = "taller-<evento>-<herramienta>"` (el mismo en los reintentos) y espera hasta 90 s (`TIEMPO_ENVIO_MS`): facturación tarda de 20 a 35 s en el acuse de `crear_cotizacion`. Los precios que van a facturación son enteros.
+
+Las tiendas se configuran con `MCP_TIENDA_<N>_URL`, `_TOKEN` y `_NOMBRE` (N = 1…9) y se consultan en paralelo: una caída no tumba la búsqueda (se usa el último catálogo). Sin ninguna, se usa la **tienda simulada** (`integraciones/tiendas/simulado/`). La validación de su API está en [`docs/integracion/tiendas.md`](docs/integracion/tiendas.md).
 
 ## Pruebas: cada funcionalidad se da por válida solo con sus pruebas
 
@@ -344,6 +359,7 @@ El contrato está en `api/src/integraciones/contrato.ts`, con ejemplos en `docs/
   - Los datos de prueba (`orden()`, `diagnostico()`, `reparacion()`, `sede()`, `catalogo`) están en el mismo archivo.
 - **Simulador** (`api`, `npm run simular -- todos`):
   - Corre los 11 casos de garantía, ruta, remisión y rechazo por MCP, siguiendo `siguiente_paso`.
+  - Con facturación real configurada (`MCP_FACTURACION_URL`), se detiene en `en_cotizacion`: la respuesta del cliente la da facturación por Telegram. Para los 11 casos completos, quite esa variable. `npm run flujo` hace lo mismo.
   - Crea una vez los usuarios agente y un mecánico por sede, y guarda sus claves y tokens en `pruebas/.usuarios-simulacion.json` (en `.gitignore`).
   - Antes de agendar, `despejarRelacion` (`pruebas/agentes.mjs`) cierra las órdenes que una prueba a mano dejó abiertas para ese `id_relacion`. Cancela, cobra o da salida según el estado. Una orden `en_reparacion` hay que terminarla a mano.
 - **Punta a punta** (`api`, `npm run flujo`):

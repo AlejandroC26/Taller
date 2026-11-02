@@ -144,6 +144,29 @@ export const ordenDeCompra = (repuestos) =>
     return { codigo_repuesto: r.codigo_repuesto, cantidad: r.cantidad, tienda, precio_unitario: precio };
   });
 
+// El mecánico elige los repuestos del catálogo de la tienda (la simulada si no hay
+// MCP_TIENDA_1_URL): cada código del caso se busca antes de usarlo, como en la web.
+export async function deLaTienda(usuario, codigo, servicios) {
+  const elegidos = [];
+  for (const s of servicios) {
+    const repuestos = [];
+    for (const r of s.repuestos ?? []) {
+      const { repuestos: hallados } = await llamar(usuario, 'buscar_repuestos_tienda', { codigo, texto: r.codigo_repuesto }, { mostrar: false });
+      if (!hallados.some((h) => h.codigo_repuesto === r.codigo_repuesto)) throw new Error(`La tienda no tiene ${r.codigo_repuesto} en su catálogo`);
+      repuestos.push({ codigo_repuesto: r.codigo_repuesto, cantidad: r.cantidad });
+    }
+    elegidos.push({ ...s, repuestos });
+  }
+  return elegidos;
+}
+
+// Con facturación real configurada (MCP_FACTURACION_URL), la respuesta del cliente la da
+// facturación por Telegram: el simulador no debe responder por ella.
+export async function facturacionReal() {
+  const { destinos } = await llamar('agente-concesionario', 'consultar_bandeja', {}, { mostrar: false });
+  return destinos.some((d) => d.destino === 'facturacion' && d.configurado);
+}
+
 // El taller no permite dos órdenes abiertas para el mismo id_relacion, y una prueba a mano
 // (o una corrida cortada) puede haber dejado una a medias: se cierra antes de agendar.
 export async function despejarRelacion(idRelacion) {

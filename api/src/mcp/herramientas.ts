@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { NOMBRE_TALLER } from '../config';
 import { validar } from '../comun/http';
 import { consultarCotizacion, pagoDto, registrarPago, registrarRespuestaCliente, respuestaClienteDto } from '../cotizaciones/cotizaciones.service';
-import { finalizarDiagnostico, guardarDiagnostico, remitirOrden, verDiagnostico } from '../diagnosticos/diagnosticos.service';
+import { buscarRepuestosParaOrden, finalizarDiagnostico, guardarDiagnostico, remitirOrden, verDiagnostico } from '../diagnosticos/diagnosticos.service';
 import { diagnosticoDto, remitirDto } from '../diagnosticos/dto';
 import { guardarEvidencia, listarEvidencias } from '../diagnosticos/evidencias.service';
 import { CAUSAS, PAGADORES } from '../garantias/reglas';
@@ -31,7 +31,7 @@ import {
   terminarReparacion,
   verReparacion,
 } from '../reparaciones/reparaciones.service';
-import { buscarCodigosRepuesto, listarServicios, registrarServicio, servicioDto } from '../servicios/servicios.service';
+import { listarServicios, registrarServicio, servicioDto } from '../servicios/servicios.service';
 import { ESPECIALIDADES, TIPOS_TALLER } from '../talleres/reglas';
 import { actualizarTaller, disponibilidad, editarTallerDto, listarTalleres, registrarTaller, tallerDto } from '../talleres/talleres.service';
 import type { Actor } from '../usuarios/actor';
@@ -81,6 +81,32 @@ const SALIDA_ORDEN = z.looseObject({
   siguiente_paso: z.looseObject({ responsable: z.string(), descripcion: z.string() }),
   acciones_disponibles: z.array(z.string()),
 });
+const SEDE = z.looseObject({
+  id: z.number(),
+  codigo: z.string(),
+  nombre: z.string(),
+  ubicacion: z.looseObject({ ciudad: z.string(), direccion: z.string() }),
+});
+// agendar_cita: la orden con su sede y la fecha de la cita en hora de Colombia.
+const SALIDA_CITA = z.looseObject({
+  ...SALIDA_ORDEN.shape,
+  sede: SEDE,
+  fecha_cita: z.string().describe('ISO 8601 con zona -05:00; por ejemplo 2026-11-03T08:00:00-05:00'),
+});
+const SALIDA_PREDIAGNOSTICO = z.looseObject({
+  id_relacion: z.string(),
+  vehiculo: z.string(),
+  especialidad: z.string(),
+  ruta: z.enum(['especializada', 'revision_general']),
+  confianza: z.number(),
+  resumen: z.string(),
+  fuente: z.enum(['modelo', 'reglas']).describe('modelo: lo decidió el agente de IA; reglas: palabras clave del catálogo'),
+  servicios_probables: z.array(z.looseObject({ sku: z.string(), nombre: z.string(), precio_mano_obra: z.number() })),
+  garantia: z.looseObject({ vigente: z.boolean(), vence: z.string(), cubre: z.array(z.string()), motivo: z.string().optional() }),
+  sede_sugerida: SEDE.nullable(),
+  siguiente_paso: z.looseObject({ responsable: z.string(), descripcion: z.string() }),
+  acciones_disponibles: z.array(z.string()),
+});
 const SALIDA_LISTA = z.looseObject({ elementos: z.array(z.looseObject({})), total: z.number() });
 const SALIDA_OBJETO = z.looseObject({});
 
@@ -105,7 +131,7 @@ export const HERRAMIENTAS_MECANICO = [
   'marcar_tarea',
   'terminar_reparacion',
   'consultar_servicios',
-  'buscar_codigos_repuesto',
+  'buscar_repuestos_tienda',
   'listar_talleres',
 ];
 
@@ -211,12 +237,13 @@ export function crearServidorMcp(actor: Actor): McpServer {
         title: 'Prediagnóstico (servicio de diagnóstico del taller)',
         description:
           'El agente de prediagnóstico lee lo que el cliente le contó al concesionario y responde la especialidad, los servicios probables con su precio, la confianza y la ruta: ' +
-          '"especializada" (directo a la sede especialista) o "revision_general" (primero a mantenimiento). Incluye la sede sugerida y la garantía del vehículo.',
+          '"especializada" (directo a la sede especialista) o "revision_general" (primero a mantenimiento). Incluye la sede sugerida y la garantía del vehículo. ' +
+          'Responde en menos de 60 s; si no alcanza, devuelve un error para reintentar.',
         inputSchema: z.object({
           id_relacion: z.string().describe('Id de la relación cliente–vehículo del concesionario; por ejemplo REL-1001'),
           mensajes_cliente: z.array(z.string()).min(1).describe('Lo que el cliente contó, un mensaje por elemento'),
         }),
-        outputSchema: SALIDA_OBJETO,
+        outputSchema: SALIDA_PREDIAGNOSTICO,
         annotations: LECTURA,
       },
       ({ id_relacion, mensajes_cliente }) =>
@@ -259,7 +286,7 @@ export function crearServidorMcp(actor: Actor): McpServer {
           motivo_reclamo: z.string().optional(),
           id_mensaje: idMensaje,
         }),
-        outputSchema: SALIDA_ORDEN,
+        outputSchema: SALIDA_CITA,
         annotations: ESCRIBE,
       },
       (e) =>
@@ -375,7 +402,7 @@ export function crearServidorMcp(actor: Actor): McpServer {
           orden_compra: z
             .array(
               z.object({
-                codigo_repuesto: z.string(),
+                codigo_repuesto: z.string().describe('Código universal (el de la cotización)'),
                 descripcion: z.string().optional(),
                 cantidad: z.number().int(),
                 tienda: z.string(),
@@ -484,7 +511,7 @@ export function crearServidorMcp(actor: Actor): McpServer {
         title: 'Registrar diagnóstico (borrador)',
         description:
           'Guarda el borrador: cada servicio es un SKU del catálogo, con la causa de la falla, el dictamen de garantía del mecánico (aplica o no y por qué) ' +
-          'y los repuestos a comprar (código universal y cantidad). Con id se actualiza un servicio; sin id se crea; los que no se envíen se borran.',
+          'y los repuestos a comprar, elegidos con buscar_repuestos_tienda (codigo_repuesto y cantidad). Con id se actualiza un servicio; sin id se crea; los que no se envíen se borran.',
         inputSchema: z.object({
           codigo,
           observaciones: z.string().optional(),
@@ -497,7 +524,12 @@ export function crearServidorMcp(actor: Actor): McpServer {
               garantia_aplica: z.boolean().optional().describe('Dictamen del mecánico; si se omite, el sugerido por la causa'),
               garantia_motivo: z.string().optional(),
               repuestos: z
-                .array(z.object({ codigo_repuesto: z.string(), descripcion: z.string().optional(), cantidad: z.number().int() }))
+                .array(
+                  z.object({
+                    codigo_repuesto: z.string().describe('Código universal, según buscar_repuestos_tienda; por ejemplo PAS-DEL-CER'),
+                    cantidad: z.number().int(),
+                  }),
+                )
                 .optional(),
             }),
           ),
@@ -519,7 +551,7 @@ export function crearServidorMcp(actor: Actor): McpServer {
                 causa: s.causa ?? null,
                 garantiaAplica: s.garantia_aplica,
                 garantiaMotivo: s.garantia_motivo,
-                repuestos: (s.repuestos ?? []).map((r) => ({ codigoRepuesto: r.codigo_repuesto, descripcion: r.descripcion, cantidad: r.cantidad })),
+                repuestos: (s.repuestos ?? []).map((r) => ({ codigoRepuesto: r.codigo_repuesto, cantidad: r.cantidad })),
               })),
             }),
           ),
@@ -693,17 +725,39 @@ export function crearServidorMcp(actor: Actor): McpServer {
   );
 
   registrar(
-    'buscar_codigos_repuesto',
+    'buscar_repuestos_tienda',
     servidor.registerTool(
-      'buscar_codigos_repuesto',
+      'buscar_repuestos_tienda',
       {
-        title: 'Buscar códigos de repuesto',
-        description: 'Códigos universales de repuestos (iguales en todas las tiendas). Sin precio: el precio lo consigue facturación.',
-        inputSchema: z.object({ texto: z.string().optional() }),
-        outputSchema: SALIDA_LISTA,
-        annotations: LECTURA,
+        title: 'Buscar repuestos en el catálogo de la tienda',
+        description:
+          'Busca en el catálogo de la tienda de repuestos, por código universal (por ejemplo PAS-DEL-CER), nombre o categoría. ' +
+          'Devuelve código, nombre, categoría, marcas y unidades disponibles, sin precio: el precio lo consigue facturación. ' +
+          'Use codigo_repuesto en registrar_diagnostico. El catálogo se guarda unos minutos; refrescar=true lo pide de nuevo.',
+        inputSchema: z.object({
+          codigo,
+          texto: z.string().optional().describe('Parte del código, el nombre o la categoría; por ejemplo: pastillas'),
+          categoria: z.string().optional().describe('Solo esta categoría; por ejemplo: Frenos'),
+          refrescar: z.boolean().optional().describe('true para pedir el catálogo otra vez a la tienda'),
+        }),
+        outputSchema: z.looseObject({
+          tiendas: z.array(z.string()),
+          sin_respuesta: z.array(z.string()),
+          actualizado_en: z.string().nullable(),
+          categorias: z.array(z.string()),
+          repuestos: z.array(
+            z.looseObject({
+              codigo_repuesto: z.string(),
+              nombre: z.string(),
+              categoria: z.string(),
+              marcas: z.array(z.string()),
+              unidades_disponibles: z.number(),
+            }),
+          ),
+        }),
+        annotations: { readOnlyHint: true, openWorldHint: true },
       },
-      ({ texto }) => seguro(() => buscarCodigosRepuesto(texto)),
+      (e) => seguro(() => buscarRepuestosParaOrden(actor, e.codigo, { texto: e.texto, categoria: e.categoria, refrescar: e.refrescar })),
     ),
   );
 

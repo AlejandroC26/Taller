@@ -1,10 +1,8 @@
 import { z } from 'zod';
 import { bd } from '../base-datos/conexion';
 import { invalido } from '../comun/errores';
-import { sinTildes } from '../prediagnostico/reglas';
 import { ESPECIALIDADES } from '../talleres/reglas';
 import type { Especialidad } from '../talleres/reglas';
-import { CodigoRepuesto } from './codigo-repuesto.entity';
 import { Servicio } from './servicio.entity';
 
 export const servicioDto = z.object({
@@ -50,14 +48,4 @@ export async function registrarServicio(datos: z.infer<typeof servicioDto>) {
   const repo = (await bd()).getRepository(Servicio);
   const existente = await repo.findOneBy({ sku: datos.sku });
   return aServicio(await repo.save({ ...(existente ?? {}), ...datos }));
-}
-
-export async function buscarCodigosRepuesto(texto?: string) {
-  const lista = await (await bd()).getRepository(CodigoRepuesto).find({ order: { codigo: 'ASC' } });
-  const t = sinTildes(texto?.trim() ?? '');
-  return lista.filter((c) => !t || sinTildes(`${c.codigo} ${c.descripcion} ${c.sistema}`).includes(t)).slice(0, 50);
-}
-
-export async function descripcionRepuesto(codigo: string): Promise<string | null> {
-  return (await (await bd()).getRepository(CodigoRepuesto).findOneBy({ codigo: codigo.trim().toUpperCase() }))?.descripcion ?? null;
 }

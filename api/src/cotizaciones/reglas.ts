@@ -3,8 +3,9 @@ import type { Causa, Pagador } from '../garantias/reglas';
 import { NOMBRE_CAUSA } from '../garantias/reglas';
 
 // Lo que el taller le envía a facturación para armar la orden: la mano de obra con su
-// precio (SKU) y, si hacen falta, los repuestos solo con código universal y cantidad.
-// Facturación busca los precios en las tiendas y le escribe al cliente por Telegram.
+// precio (SKU) y, si hacen falta, los repuestos que el mecánico eligió del catálogo de la
+// tienda (código universal y cantidad), sin precio. Facturación cotiza con la tienda y le escribe
+// al cliente por Telegram.
 
 export interface GarantiaLinea {
   aplica: boolean;
@@ -25,7 +26,7 @@ export interface TareaCotizable {
   garantiaRespuesta: string | null;
   pagador: Pagador;
   completada?: boolean;
-  repuestos: { codigoRepuesto: string; descripcion: string; cantidad: number }[];
+  repuestos: { codigoRepuesto: string; descripcion: string; categoria: string; cantidad: number }[];
 }
 
 export interface Cotizacion {
@@ -34,9 +35,17 @@ export interface Cotizacion {
   taller: string;
   sede: string;
   cliente: { cedula: string; nombre: string; telefono: string };
-  vehiculo: { vin: string; placa: string; descripcion: string };
+  vehiculo: { vin: string; placa: string; marca: string; modelo: string; anio: number; descripcion: string };
   mano_obra: { tarea_id: number; sku: string; descripcion: string; precio: number; causa: string | null; garantia: GarantiaLinea }[];
-  repuestos: { tarea_id: number; codigo_repuesto: string; descripcion: string; cantidad: number; garantia: GarantiaLinea }[];
+  repuestos: {
+    tarea_id: number;
+    // Código universal, el que entiende la tienda (consultar_precio_repuesto).
+    codigo_repuesto: string;
+    descripcion: string;
+    categoria: string;
+    cantidad: number;
+    garantia: GarantiaLinea;
+  }[];
   total_mano_obra: number;
   total_mano_obra_cliente: number;
   hay_repuestos: boolean;
@@ -78,7 +87,8 @@ export function armarCotizacion(
     tarea_id: t.id,
     sku: t.servicioSku,
     descripcion: t.descripcion ? `${t.servicioNombre}: ${t.descripcion}` : t.servicioNombre,
-    precio: t.precio,
+    // Facturación pide pesos enteros.
+    precio: Math.round(t.precio),
     causa: t.causa,
     garantia: garantiaDe(t),
   }));
@@ -87,6 +97,7 @@ export function armarCotizacion(
       tarea_id: t.id,
       codigo_repuesto: r.codigoRepuesto,
       descripcion: r.descripcion,
+      categoria: r.categoria,
       cantidad: r.cantidad,
       garantia: garantiaDe(t),
     })),
@@ -95,8 +106,8 @@ export function armarCotizacion(
     ...datos,
     mano_obra,
     repuestos,
-    total_mano_obra: pesos(mano_obra.reduce((s, l) => s + l.precio, 0)),
-    total_mano_obra_cliente: pesos(mano_obra.filter((l) => l.garantia.pagador === 'cliente').reduce((s, l) => s + l.precio, 0)),
+    total_mano_obra: Math.round(mano_obra.reduce((s, l) => s + l.precio, 0)),
+    total_mano_obra_cliente: Math.round(mano_obra.filter((l) => l.garantia.pagador === 'cliente').reduce((s, l) => s + l.precio, 0)),
     hay_repuestos: repuestos.length > 0,
     mensaje_garantia: mensajeGarantia(tareas),
   };

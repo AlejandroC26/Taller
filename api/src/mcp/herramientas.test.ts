@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { conflicto } from '../comun/errores';
+import { conflicto, noDisponible } from '../comun/errores';
 import { actorDe } from '../comun/pruebas';
 import * as diagnosticos from '../diagnosticos/diagnosticos.service';
 import * as garantias from '../garantias/garantias.service';
@@ -10,18 +10,41 @@ import * as ordenes from '../ordenes/ordenes.service';
 import { PASOS } from '../ordenes/reglas';
 import { crearServidorMcp, HERRAMIENTAS_MECANICO } from './herramientas';
 
+const SEDE = { id: 2, codigo: 'PL-FRENOS', nombre: 'Pulgas Locas Frenos y Suspensión', ubicacion: { ciudad: 'Bogotá', direccion: 'Calle 1' } };
 const orden = { codigo: 'OT-0001', estado: 'agendada', siguiente_paso: { responsable: 'mecanico', descripcion: 'x' }, acciones_disponibles: ['tomar_orden'] };
 
 vi.mock('../ordenes/ordenes.service', async (original) => ({
   ...(await original<typeof import('../ordenes/ordenes.service')>()),
   unaOrden: vi.fn(async () => orden),
-  agendarCita: vi.fn(async () => orden),
+  agendarCita: vi.fn(async () => ({ ...orden, sede: SEDE, fecha_cita: '2026-11-03T08:00:00-05:00' })),
+  consultarPrediagnostico: vi.fn(async () => ({
+    id_relacion: 'REL-1001',
+    vehiculo: 'Renault Duster 2023',
+    especialidad: 'frenos',
+    ruta: 'especializada',
+    confianza: 0.8,
+    resumen: 'Pastillas gastadas',
+    fuente: 'reglas',
+    servicios_probables: [{ sku: 'FRE-PASTILLAS', nombre: 'Cambio de pastillas de freno', precio_mano_obra: 80000 }],
+    garantia: { vigente: true, vence: '2028-03-14', kmMaximo: 60000, cubre: ['frenos'] },
+    sede_sugerida: SEDE,
+    siguiente_paso: { responsable: 'concesionario', descripcion: 'Agende la cita' },
+    acciones_disponibles: ['consultar_disponibilidad', 'agendar_cita'],
+  })),
   listarOrdenes: vi.fn(async () => [orden]),
   tomarOrden: vi.fn(async () => ({ ...orden, estado: 'en_diagnostico' })),
 }));
 vi.mock('../diagnosticos/diagnosticos.service', async (original) => ({
   ...(await original<typeof import('../diagnosticos/diagnosticos.service')>()),
   guardarDiagnostico: vi.fn(async () => ({ orden: 'OT-0001', servicios: [] })),
+  buscarRepuestosParaOrden: vi.fn(async () => ({
+    orden: 'OT-0001',
+    tiendas: ['Tienda de repuestos'],
+    sin_respuesta: [],
+    actualizado_en: '2026-10-31T19:00:00.000Z',
+    categorias: ['Frenos'],
+    repuestos: [{ codigo_repuesto: 'PAS-DEL-CER', nombre: 'Juego de pastillas delanteras cerámicas', categoria: 'Frenos', marcas: ['Bosch', 'Brembo'], unidades_disponibles: 11, tiendas: ['Tienda de repuestos'] }],
+  })),
 }));
 vi.mock('../garantias/garantias.service', async (original) => ({
   ...(await original<typeof import('../garantias/garantias.service')>()),
@@ -121,6 +144,32 @@ describe('MCP para agentes y orquestadores', () => {
     );
   });
 
+  it('prediagnosticar y agendar_cita publican su outputSchema completo y lo cumplen', async () => {
+    const cliente = await conectar('agente');
+    const { tools } = await cliente.listTools();
+    const esquema = (nombre: string) => tools.find((t) => t.name === nombre)?.outputSchema as { properties: Record<string, unknown>; required: string[] };
+    expect(esquema('prediagnosticar').required).toEqual(
+      expect.arrayContaining(['especialidad', 'ruta', 'resumen', 'servicios_probables', 'garantia', 'sede_sugerida']),
+    );
+    expect(esquema('agendar_cita').required).toEqual(expect.arrayContaining(['codigo', 'estado', 'sede', 'fecha_cita', 'siguiente_paso']));
+
+    const pre = await cliente.callTool({ name: 'prediagnosticar', arguments: { id_relacion: 'REL-1001', mensajes_cliente: ['chilla al frenar'] } });
+    expect(pre.isError).toBeFalsy();
+    expect(pre.structuredContent).toMatchObject({ ruta: 'especializada', sede_sugerida: { ubicacion: { ciudad: 'Bogotá' } } });
+    const cita = await cliente.callTool({ name: 'agendar_cita', arguments: { id_relacion: 'REL-1001', fecha_hora: '2026-11-03T08:00:00-05:00' } });
+    expect(cita.isError).toBeFalsy();
+    expect(cita.structuredContent).toMatchObject({ sede: { codigo: 'PL-FRENOS' }, fecha_cita: '2026-11-03T08:00:00-05:00' });
+  });
+
+  it('un prediagnóstico que no alcanza vuelve como isError con el mensaje en español', async () => {
+    vi.mocked(ordenes.consultarPrediagnostico).mockRejectedValueOnce(
+      noDisponible('No se pudo calcular el prediagnóstico a tiempo, intente de nuevo'),
+    );
+    const r = await (await conectar('agente')).callTool({ name: 'prediagnosticar', arguments: { id_relacion: 'REL-1001', mensajes_cliente: ['x'] } });
+    expect(r.isError).toBe(true);
+    expect(texto(r)).toContain('intente de nuevo');
+  });
+
   it('con el mismo id_mensaje no repite el cambio', async () => {
     const cliente = await conectar('agente');
     const args = { codigo: 'OT-0001', mecanico_id: '7c9e6679-7425-40de-944b-e07fc1f90ae7', id_mensaje: 'msg-1' };
@@ -158,6 +207,14 @@ describe('MCP para agentes y orquestadores', () => {
         }),
       ],
     });
+  });
+
+  it('buscar_repuestos_tienda devuelve el catálogo por código universal, sin precio', async () => {
+    const r = await (await conectar('mecanico')).callTool({ name: 'buscar_repuestos_tienda', arguments: { codigo: 'OT-0001', texto: 'pastillas', categoria: 'Frenos' } });
+    expect(r.isError).toBeFalsy();
+    expect(diagnosticos.buscarRepuestosParaOrden).toHaveBeenCalledWith(expect.anything(), 'OT-0001', { texto: 'pastillas', categoria: 'Frenos', refrescar: undefined });
+    expect(r.structuredContent).toMatchObject({ categorias: ['Frenos'], repuestos: [{ codigo_repuesto: 'PAS-DEL-CER', marcas: ['Bosch', 'Brembo'] }] });
+    expect(JSON.stringify(r.structuredContent)).not.toContain('precio');
   });
 
   it('un error de negocio vuelve con isError y el mensaje para corregir', async () => {

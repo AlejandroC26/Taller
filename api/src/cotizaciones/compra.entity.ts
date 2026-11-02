@@ -16,10 +16,11 @@ export class CompraRepuesto {
   @JoinColumn({ name: 'orden_id' })
   orden: Relation<Orden>;
 
-  @Column({ name: 'codigo_repuesto', type: 'varchar', length: 40 })
+  // Código universal, el mismo de la cotización.
+  @Column({ name: 'codigo_repuesto', type: 'varchar', length: 50 })
   codigoRepuesto: string;
 
-  @Column({ type: 'varchar', length: 160, default: '' })
+  @Column({ type: 'varchar', length: 200, default: '' })
   descripcion: string;
 
   @Column({ type: 'integer' })

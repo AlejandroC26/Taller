@@ -16,7 +16,7 @@ export const CARPETA_EVIDENCIAS = join(RAIZ, 'almacen', 'evidencias');
 
 // Dirección con la que otros agentes (el concesionario) descargan la evidencia.
 export const urlEvidencia = (id: number) =>
-  `${process.env.TALLER_URL_PUBLICA ?? 'http://localhost:3001'}/api/evidencias/${id}`;
+  `${process.env.TALLER_URL_PUBLICA ?? 'http://localhost:3417'}/api/evidencias/${id}`;
 
 const aEvidencia = (e: Evidencia) => ({
   id: e.id,

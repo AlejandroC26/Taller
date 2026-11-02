@@ -44,7 +44,13 @@ mismo usuario agente, no el de MCP.
   "fuente": "reglas",
   "ruta": "especializada",
   "servicios_probables": [{ "sku": "FRE-PASTILLAS", "nombre": "Cambio de pastillas de freno", "precio_mano_obra": 80000 }],
-  "sede_sugerida": { "id": 2, "codigo": "PL-FRENOS", "nombre": "Pulgas Locas Frenos y Suspensión" },
+  "sede_sugerida": {
+    "id": 2,
+    "codigo": "PL-FRENOS",
+    "nombre": "Pulgas Locas Frenos y Suspensión",
+    "tipo": "especializado",
+    "ubicacion": { "ciudad": "Bogotá", "direccion": "Avenida Boyacá # 64-20, Normandía", "latitud": 4.667, "longitud": -74.111 }
+  },
   "siguiente_paso": { "responsable": "concesionario", "descripcion": "Agende la cita en la sede especializada sugerida (consultar_disponibilidad → agendar_cita)" },
   "acciones_disponibles": ["consultar_disponibilidad", "agendar_cita"]
 }
@@ -53,6 +59,11 @@ mismo usuario agente, no el de MCP.
 `fuente` dice de dónde salió la respuesta:
 - `modelo`: el agente de IA (`LOCAL_URL`).
 - `reglas`: las palabras clave del catálogo. Se usan si el modelo no responde o su confianza es menor a 0,6.
+
+**Tiempo de respuesta.** El modelo tiene `LOCAL_TIEMPO_MS` (8 s por defecto) para responder; si
+no alcanza, siguen las reglas. La herramienta completa responde en menos de 45 s: si algo no
+alcanza, devuelve `isError: true` con «No se pudo calcular el prediagnóstico a tiempo, intente de
+nuevo», nunca un corte. El `outputSchema` publica todos los campos de arriba.
 
 Con un mensaje ambiguo («hace un ruido raro, no sé qué es»), la ruta es
 `revision_general` y la sede sugerida es la de mantenimiento.
@@ -71,7 +82,9 @@ Con un mensaje ambiguo («hace un ruido raro, no sé qué es»), la ruta es
 }
 ```
 
-La respuesta es la orden, igual que en `estado_orden`. Se ve así, recortada:
+La respuesta es la orden, igual que en `estado_orden`. Su `outputSchema` garantiza `codigo`,
+`estado`, `siguiente_paso`, `acciones_disponibles`, `sede { id, codigo, nombre, ubicacion }` y
+`fecha_cita` (ISO 8601 con zona `-05:00`). Se ve así, recortada:
 
 ```json
 {
@@ -79,7 +92,8 @@ La respuesta es la orden, igual que en `estado_orden`. Se ve así, recortada:
   "estado": "agendada",
   "siguiente_paso": { "responsable": "mecanico", "descripcion": "Cita agendada: cuando llegue el vehículo, un mecánico de la sede toma la orden" },
   "acciones_disponibles": ["tomar_orden", "cancelar_cita"],
-  "sede": { "id": 2, "codigo": "PL-FRENOS", "nombre": "Pulgas Locas Frenos y Suspensión", "tipo": "especializado" },
+  "sede": { "id": 2, "codigo": "PL-FRENOS", "nombre": "Pulgas Locas Frenos y Suspensión", "tipo": "especializado", "ubicacion": { "ciudad": "Bogotá", "direccion": "Avenida Boyacá # 64-20, Normandía" } },
+  "fecha_cita": "2026-10-28T09:00:00-05:00",
   "id_relacion": "REL-1007",
   "cliente": { "cedula": "79456123", "nombre": "Ricardo Peña", "telefono": "3113332211" },
   "vehiculo": { "vin": "9BWAG45U0PT700007", "marca": "Volkswagen", "modelo": "Gol", "anio": 2023, "carroceria": "Hatchback", "puertas": 5, "placa": "RPN908", "kilometraje": 22800 },
@@ -89,6 +103,21 @@ La respuesta es la orden, igual que en `estado_orden`. Se ve así, recortada:
   "historial": [{ "estado": "agendada", "fecha": "2026-10-27T13:55:21.454Z", "usuario": "Agente Concesionario", "nota": "Cita en Pulgas Locas Frenos y Suspensión" }]
 }
 ```
+
+**Idempotencia.** Con el mismo `id_mensaje` (por ejemplo `conc-<uuid>-agendar`, hasta 120
+caracteres), un reintento devuelve la misma orden y no crea otra. Si el reintento llega mientras
+la primera llamada todavía no termina, puede responder «El vehículo ya tiene la orden … abierta»:
+consulte `listar_ordenes { id_relacion, abiertas: true }` y use esa orden.
+
+**Errores de negocio** (`isError: true`, mensaje en español):
+
+| Caso | Mensaje |
+|---|---|
+| Ya hay una orden abierta | «El vehículo ya tiene la orden OT-0072 abierta» |
+| Franja llena | «Esa franja ya está llena: elija otra con consultar_disponibilidad» |
+| Hora que no es una franja | «Esa hora no es una franja de la sede: consulte consultar_disponibilidad» |
+| Sede que no existe | «No existe la sede PL-NOEXISTE» |
+| `id_relacion` desconocido | «El concesionario no reconoce el id_relacion REL-9999. El cliente debe obtenerlo en el concesionario con su cédula y el VIN» |
 
 ### Ejemplo: registrar_resultado_garantia
 
@@ -159,7 +188,7 @@ ese `id_relacion`. Si no hay conexión, el taller responde 503 y no agenda.
       "causa": "defecto_fabrica",
       "aplica": true,
       "motivo": "Compuesto de las pastillas de fábrica cristalizado a los 18.000 km",
-      "evidencias": ["http://localhost:3001/api/evidencias/14", "http://localhost:3001/api/evidencias/15"]
+      "evidencias": ["http://localhost:3417/api/evidencias/14", "http://localhost:3417/api/evidencias/15"]
     }
   ],
   "responder_con": "registrar_resultado_garantia"

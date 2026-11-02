@@ -45,6 +45,11 @@ export class Usuario {
   @JoinColumn({ name: 'taller_id' })
   taller: Relation<Taller> | null;
 
+  // Token fijo para el MCP, sin vencimiento: lo comparten los equipos del ejercicio para
+  // conectarse sin iniciar sesión. Solo lo tiene el usuario agente-compartido de la semilla.
+  @Column({ name: 'token_mcp_fijo', type: 'varchar', length: 120, nullable: true, unique: true, select: false })
+  tokenMcpFijo: string | null;
+
   @Column({ type: 'boolean', default: true })
   activo: boolean;
 

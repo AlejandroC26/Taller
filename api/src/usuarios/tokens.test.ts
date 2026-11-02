@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorHttp } from '../comun/errores';
-import { emitir, tokenDe, verificar } from './tokens';
+import { emitir, nuevoTokenFijo, pareceJwt, tokenDe, verificar } from './tokens';
 
 describe('tokens', () => {
   beforeEach(() => {
@@ -27,6 +27,14 @@ describe('tokens', () => {
 
   it('sin token responde 401 con mensaje claro', async () => {
     await expect(verificar(undefined, 'web')).rejects.toThrow('Falta el token de acceso');
+  });
+
+  it('distingue un JWT del token fijo del ejercicio', async () => {
+    expect(pareceJwt(await emitir('usuario-1', 'mcp'))).toBe(true);
+    const fijo = nuevoTokenFijo();
+    expect(fijo).toMatch(/^pl-mcp-[0-9a-f]{24}$/);
+    expect(pareceJwt(fijo)).toBe(false);
+    expect(nuevoTokenFijo()).not.toBe(fijo);
   });
 
   it('lee el token Bearer de la cabecera', () => {

@@ -12,7 +12,6 @@ import { RelacionVehiculo } from '../relaciones/relacion.entity';
 import { ParteUsada } from '../reparaciones/parte-usada.entity';
 import { RegistroHoras } from '../reparaciones/registro-horas.entity';
 import { Reparacion } from '../reparaciones/reparacion.entity';
-import { CodigoRepuesto } from '../servicios/codigo-repuesto.entity';
 import { Servicio } from '../servicios/servicio.entity';
 import { Taller } from '../talleres/taller.entity';
 import { Rol } from '../usuarios/rol.entity';
@@ -25,7 +24,6 @@ export const ENTIDADES = [
   Usuario,
   Taller,
   Servicio,
-  CodigoRepuesto,
   RelacionVehiculo,
   Orden,
   Asignacion,

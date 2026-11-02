@@ -6,7 +6,7 @@ import { cifrarClave, claveCorrecta } from './claves';
 import type { EditarUsuario, NuevoUsuario } from './dto';
 import { Taller } from '../talleres/taller.entity';
 import { Rol } from './rol.entity';
-import { emitir, verificar } from './tokens';
+import { emitir, pareceJwt, verificar } from './tokens';
 import type { Audiencia } from './tokens';
 import { Usuario } from './usuario.entity';
 
@@ -31,13 +31,20 @@ export async function entrar(usuario: string, clave: string) {
   return { token: await emitir(encontrado.id, 'web'), usuario: aActor(encontrado) };
 }
 
+async function idDelTokenFijo(token: string): Promise<string> {
+  const dueno = await (await bd()).getRepository(Usuario).findOne({ where: { tokenMcpFijo: token }, select: { id: true } });
+  if (!dueno) throw noAutorizado('El token no es válido o ya venció');
+  return dueno.id;
+}
+
 // Valida el token y trae al usuario de la base: si cambió su rol o lo desactivaron,
 // se nota de inmediato.
 export async function actorDelToken(
   token: string | undefined,
   audiencia: Audiencia,
 ): Promise<Actor> {
-  const id = await verificar(token, audiencia);
+  // En el MCP, un token que no es JWT se busca como token fijo (el del ejercicio).
+  const id = audiencia === 'mcp' && token && !pareceJwt(token) ? await idDelTokenFijo(token) : await verificar(token, audiencia);
   const usuario = await (await bd()).getRepository(Usuario).findOneBy({ id });
   if (!usuario) throw noAutorizado('La cuenta ya no existe');
   if (!usuario.activo) throw noAutorizado('La cuenta está desactivada');

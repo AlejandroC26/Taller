@@ -32,3 +32,35 @@ export function configuracion(destino: Destino, entorno: Record<string, string |
   const url = entorno[`${prefijo}_URL`]?.trim();
   return url ? { url, token: entorno[`${prefijo}_TOKEN`]?.trim() || undefined } : null;
 }
+
+// Tiendas de repuestos: el taller solo lee su catálogo por código universal, para que el
+// mecánico elija la parte. Facturación cotiza y compra. El precio que devuelven se descarta.
+export const CONTRATO_TIENDAS = {
+  descripcion: 'Tiendas de repuestos: el taller le pide el catálogo a su agente; facturación cotiza y compra',
+  herramientas: {
+    hablar_con_repuestos:
+      '{ mensaje: "¿Qué repuestos tienen disponibles?…" } → { respuesta, catalogo: { repuestos[{ codigo_repuesto, nombre, categoria, marcas[], unidades_disponibles }] } } (se guarda 5 minutos)',
+  },
+};
+
+export interface ConfTienda {
+  nombre: string;
+  url: string;
+  token?: string;
+}
+
+// MCP_TIENDA_1_URL, MCP_TIENDA_1_TOKEN, MCP_TIENDA_1_NOMBRE… hasta 9 tiendas. Cada tienda
+// es su propia instancia: no hay un servicio que las reúna.
+export function tiendasConfiguradas(entorno: Record<string, string | undefined> = process.env): ConfTienda[] {
+  const tiendas: ConfTienda[] = [];
+  for (let n = 1; n <= 9; n++) {
+    const url = entorno[`MCP_TIENDA_${n}_URL`]?.trim();
+    if (!url) continue;
+    tiendas.push({
+      nombre: entorno[`MCP_TIENDA_${n}_NOMBRE`]?.trim() || `Tienda ${n}`,
+      url,
+      token: entorno[`MCP_TIENDA_${n}_TOKEN`]?.trim() || undefined,
+    });
+  }
+  return tiendas;
+}

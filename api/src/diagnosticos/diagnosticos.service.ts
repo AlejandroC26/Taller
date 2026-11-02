@@ -1,15 +1,16 @@
 import type { EntityManager } from 'typeorm';
 import { bd } from '../base-datos/conexion';
 import { pesos } from '../comun/columnas';
-import { invalido, noEncontrado } from '../comun/errores';
+import { invalido, noDisponible, noEncontrado } from '../comun/errores';
 import { dictamenSugerido, NOMBRE_CAUSA } from '../garantias/reglas';
 import { solicitarValidacion } from '../garantias/garantias.service';
 import { avisarDespacho } from '../integraciones/bandeja';
+import { tiendas } from '../integraciones/tiendas';
 import { Asignacion } from '../ordenes/asignacion.entity';
 import { Orden } from '../ordenes/orden.entity';
 import { asignadoA, cargarOrden, nombreDe, transicionar, unaOrden } from '../ordenes/ordenes.service';
 import { codigoOrden, exigirTrabajo } from '../ordenes/reglas';
-import { catalogoServicios, descripcionRepuesto } from '../servicios/servicios.service';
+import { catalogoServicios } from '../servicios/servicios.service';
 import { buscarTaller } from '../talleres/talleres.service';
 import type { Actor } from '../usuarios/actor';
 import { Diagnostico } from './diagnostico.entity';
@@ -17,7 +18,7 @@ import type { DatosDiagnostico } from './dto';
 import { Evidencia } from './evidencia.entity';
 import { urlEvidencia } from './evidencias.service';
 import { Repuesto } from './repuesto.entity';
-import { exigirListoParaFinalizar } from './reglas';
+import { categoriasDe, exigirListoParaFinalizar, filtrarCatalogo } from './reglas';
 import { Tarea } from './tarea.entity';
 
 // El SKU que se cobra cuando una orden pasa por la revisión general antes de remitirse.
@@ -52,7 +53,13 @@ export const aTarea = (t: Tarea, evidencias: Evidencia[] = []) => ({
   },
   completada: t.completada,
   fija: t.fija,
-  repuestos: t.repuestos.map((r) => ({ id: r.id, codigo_repuesto: r.codigoRepuesto, descripcion: r.descripcion, cantidad: r.cantidad })),
+  repuestos: t.repuestos.map((r) => ({
+    id: r.id,
+    codigo_repuesto: r.codigoRepuesto,
+    descripcion: r.descripcion,
+    categoria: r.categoria,
+    cantidad: r.cantidad,
+  })),
   evidencias: evidencias
     .filter((e) => e.tarea?.id === t.id)
     .map((e) => ({ id: e.id, nombre: e.nombre, tipo: e.tipo, url: urlEvidencia(e.id) })),
@@ -96,10 +103,54 @@ async function enDiagnostico<T>(actor: Actor, codigo: string, trabajo: (tx: Enti
   });
 }
 
+// Repuestos del catálogo de las tiendas, por código universal. El catálogo se pide al agente
+// de cada tienda una vez y se guarda unos minutos; aquí solo se filtra.
+export async function buscarRepuestosParaOrden(actor: Actor, codigo: string, filtro: { texto?: string; categoria?: string; refrescar?: boolean } = {}) {
+  const orden = await cargarOrden((await bd()).manager, actor, codigo);
+  const proveedor = tiendas();
+  const catalogo = await proveedor.catalogo({ refrescar: filtro.refrescar });
+  if (!catalogo.repuestos.length && catalogo.sin_respuesta.length) {
+    throw noDisponible(`La tienda no respondió (${catalogo.sin_respuesta.join(', ')}): intente de nuevo en un momento`);
+  }
+  return {
+    orden: codigoOrden(orden.id),
+    tiendas: proveedor.nombres,
+    sin_respuesta: catalogo.sin_respuesta,
+    actualizado_en: catalogo.actualizado_en,
+    categorias: categoriasDe(catalogo.repuestos),
+    repuestos: filtrarCatalogo(catalogo.repuestos, filtro.texto, filtro.categoria),
+  };
+}
+
+type Copia = Pick<Repuesto, 'codigoRepuesto' | 'descripcion' | 'categoria'>;
+
+// Nombre y categoría de cada código elegido. Los que ya estaban guardados no se vuelven a
+// revisar; los nuevos deben estar en el catálogo de la tienda. Se hace fuera de la
+// transacción: la tienda puede tardar y no debe dejar filas bloqueadas.
+export async function copiasDelCatalogo(datos: DatosDiagnostico, guardados: Repuesto[]): Promise<Map<string, Copia>> {
+  const copias = new Map<string, Copia>(guardados.map((r) => [r.codigoRepuesto, r]));
+  const faltan = [...new Set(datos.tareas.flatMap((t) => t.repuestos.map((r) => r.codigoRepuesto)))].filter((c) => !copias.has(c));
+  if (!faltan.length) return copias;
+  const catalogo = await tiendas().catalogo();
+  const porCodigo = new Map(catalogo.repuestos.map((r) => [r.codigo_repuesto, r]));
+  for (const codigoRepuesto of faltan) {
+    const r = porCodigo.get(codigoRepuesto);
+    if (!r && !catalogo.repuestos.length && catalogo.sin_respuesta.length) {
+      throw noDisponible(`La tienda no respondió (${catalogo.sin_respuesta.join(', ')}): intente guardar de nuevo en un momento`);
+    }
+    if (!r) throw invalido(`El repuesto ${codigoRepuesto} no está en el catálogo de la tienda: búsquelo con buscar_repuestos_tienda`);
+    copias.set(codigoRepuesto, { codigoRepuesto, descripcion: r.nombre, categoria: r.categoria });
+  }
+  return copias;
+}
+
 // Guarda el borrador. Los servicios con id se actualizan, los nuevos se crean y los que
 // faltan se borran; los fijos (la revisión general) no se tocan.
 export async function guardarDiagnostico(actor: Actor, codigo: string, datos: DatosDiagnostico) {
   const catalogo = new Map((await catalogoServicios()).map((s) => [s.sku, s]));
+  const db = await bd();
+  const previo = await buscarDiagnostico((await cargarOrden(db.manager, actor, codigo)).id);
+  const copias = await copiasDelCatalogo(datos, previo.tareas.flatMap((t) => t.repuestos));
   await enDiagnostico(actor, codigo, async (tx, _orden, d) => {
     const existentes = new Map(d.tareas.map((t) => [t.id, t]));
     const fijas = d.tareas.filter((t) => t.fija);
@@ -137,9 +188,16 @@ export async function guardarDiagnostico(actor: Actor, codigo: string, datos: Da
         : await tx.save(tx.create(Tarea, { ...campos, diagnostico: { id: d.id } }));
       await tx.delete(Repuesto, { tarea: { id: tarea.id } });
       for (const r of t.repuestos) {
-        const descripcion = r.descripcion || (await descripcionRepuesto(r.codigoRepuesto));
-        if (!descripcion) throw invalido(`Describa el repuesto ${r.codigoRepuesto}: no está en el catálogo de códigos`);
-        await tx.save(tx.create(Repuesto, { tarea: { id: tarea.id }, codigoRepuesto: r.codigoRepuesto, descripcion, cantidad: r.cantidad }));
+        const c = copias.get(r.codigoRepuesto)!;
+        await tx.save(
+          tx.create(Repuesto, {
+            tarea: { id: tarea.id },
+            codigoRepuesto: c.codigoRepuesto,
+            descripcion: c.descripcion,
+            categoria: c.categoria,
+            cantidad: r.cantidad,
+          }),
+        );
       }
     }
   });

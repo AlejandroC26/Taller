@@ -1,11 +1,12 @@
+import { randomBytes } from 'node:crypto';
 import { DataSource } from 'typeorm';
 import { requerida } from '../config';
-import { CodigoRepuesto } from '../servicios/codigo-repuesto.entity';
 import { Servicio } from '../servicios/servicio.entity';
 import type { Especialidad } from '../talleres/reglas';
 import { Taller } from '../talleres/taller.entity';
 import { cifrarClave } from '../usuarios/claves';
 import { Rol } from '../usuarios/rol.entity';
+import { nuevoTokenFijo } from '../usuarios/tokens';
 import { Usuario } from '../usuarios/usuario.entity';
 import { opcionesBaseDatos } from './opciones';
 
@@ -91,26 +92,8 @@ for (const [sku, nombre, especialidad, precioManoObra, horasEstandar, palabrasCl
   await servicios.save({ ...(existente ?? {}), sku, nombre, especialidad, precioManoObra, horasEstandar, palabrasClave, activo: true });
 }
 
-// Códigos universales de repuestos (iguales en todas las tiendas). Sin precio ni stock.
-const CODIGOS: [string, string, string][] = [
-  ['ACE-5W30-1L', 'Aceite sintético 5W-30, 1 litro', 'mantenimiento_general'],
-  ['FIL-ACE-STD', 'Filtro de aceite estándar', 'mantenimiento_general'],
-  ['FIL-AIRE-STD', 'Filtro de aire de motor', 'mantenimiento_general'],
-  ['PAS-DEL-CER', 'Juego de pastillas delanteras cerámicas', 'frenos'],
-  ['PAS-TRA-CER', 'Juego de pastillas traseras cerámicas', 'frenos'],
-  ['DIS-DEL-VENT', 'Disco de freno delantero ventilado', 'frenos'],
-  ['LIQ-FRE-DOT4', 'Líquido de frenos DOT 4, 500 ml', 'frenos'],
-  ['AMO-DEL-GAS', 'Amortiguador delantero a gas', 'suspension'],
-  ['AMO-TRA-GAS', 'Amortiguador trasero a gas', 'suspension'],
-  ['BUJ-IRI-STD', 'Bujía de iridio', 'motor'],
-  ['BOB-ENC-STD', 'Bobina de encendido', 'motor'],
-  ['BAT-12V-60AH', 'Batería 12 V 60 Ah', 'electrico'],
-  ['ALT-90A-STD', 'Alternador 90 A', 'electrico'],
-  ['KIT-EMB-STD', 'Kit de embrague (disco, prensa y balinera)', 'transmision'],
-  ['SEN-OXI-STD', 'Sensor de oxígeno', 'motor'],
-];
-const codigos = db.getRepository(CodigoRepuesto);
-for (const [codigo, descripcion, sistema] of CODIGOS) await codigos.save({ codigo, descripcion, sistema });
+// Los repuestos no se siembran: el mecánico los elige del catálogo de las tiendas
+// (integraciones/tiendas, o la tienda simulada si no hay MCP_TIENDA_1_URL).
 
 // El primer administrador sale del archivo .env; los demás usuarios los crea él.
 const usuario = requerida('TALLER_ADMIN_USUARIO').toLowerCase();
@@ -131,8 +114,30 @@ await usuarios.save({
   claveHash: await cifrarClave(clave),
 });
 
+// El agente compartido del ejercicio: cualquier equipo se conecta al MCP con su token
+// fijo, sin iniciar sesión. Sale de TALLER_MCP_TOKEN_FIJO; si no está, se conserva el que
+// ya tenía o se crea uno. Nadie conoce su clave: no entra a la web. Si el administrador
+// lo desactiva, la semilla lo deja desactivado.
+const COMPARTIDO = 'agente-compartido';
+const compartido = await usuarios.findOne({ where: { usuario: COMPARTIDO }, select: { id: true, activo: true, tokenMcpFijo: true } });
+const tokenFijo = process.env.TALLER_MCP_TOKEN_FIJO?.trim() || compartido?.tokenMcpFijo || nuevoTokenFijo();
+await usuarios.save({
+  ...(compartido ?? {}),
+  nombre: 'Agente',
+  apellido: 'compartido',
+  documento: '0000000001',
+  telefono: '0000000',
+  usuario: COMPARTIDO,
+  activo: compartido?.activo ?? true,
+  taller: null,
+  rol: await roles.findOneByOrFail({ nombre: 'agente' }),
+  claveHash: await cifrarClave(randomBytes(24).toString('hex')),
+  tokenMcpFijo: tokenFijo,
+});
+
 console.log(
   `Semilla cargada: ${ROLES.length} roles, ${SEDES.length} sedes, ${SERVICIOS.length} servicios, ` +
-    `${CODIGOS.length} códigos de repuesto y el administrador ${usuario}`,
+    `el administrador ${usuario} y el agente compartido`,
 );
+console.log(`Token fijo del MCP (${COMPARTIDO}): ${tokenFijo}`);
 await db.destroy();

@@ -1,13 +1,15 @@
 import { z } from 'zod';
 import { CAUSAS } from '../garantias/reglas';
 
+// El repuesto se elige del catálogo de la tienda (buscar_repuestos_tienda) por su código
+// universal. Nombre y categoría se copian del catálogo al guardar.
 export const repuestoDto = z.object({
   codigoRepuesto: z
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^[A-Z0-9._-]{2,40}$/, 'Código de repuesto inválido: el código universal, igual en todas las tiendas'),
-  descripcion: z.string().trim().max(160).optional(),
+    .min(1, 'Elija el repuesto del catálogo de la tienda')
+    .max(50, 'El código del repuesto tiene hasta 50 caracteres'),
   cantidad: z.number().int('La cantidad debe ser un número entero').min(1, 'La cantidad mínima es 1').max(100),
 });
 

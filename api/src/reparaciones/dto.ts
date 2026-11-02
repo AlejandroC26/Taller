@@ -12,8 +12,8 @@ export const horasDto = z.object({
 // Lo que se usó y gastó: código universal y cantidad. Si viene de la orden de compra de
 // facturación, se enlaza con compraId.
 export const parteDto = z.object({
-  codigoRepuesto: z.string().trim().toUpperCase().regex(/^[A-Z0-9._-]{2,40}$/, 'Código de repuesto inválido'),
-  descripcion: z.string().trim().max(160).optional(),
+  codigoRepuesto: z.string().trim().toUpperCase().min(1, 'Indique el código del repuesto').max(50, 'El código tiene hasta 50 caracteres'),
+  descripcion: z.string().trim().max(200).optional(),
   cantidad: z.number().int('La cantidad debe ser un número entero').min(1, 'La cantidad mínima es 1').max(100),
   compraId: z.number().int().positive().optional(),
   nota: z.string().trim().max(300).default(''),

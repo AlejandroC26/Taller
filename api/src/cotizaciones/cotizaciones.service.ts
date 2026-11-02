@@ -25,8 +25,9 @@ export const respuestaClienteDto = z.object({
   ordenCompra: z
     .array(
       z.object({
-        codigoRepuesto: z.string().trim().toUpperCase().min(2),
-        descripcion: z.string().trim().max(160).optional(),
+        // El código universal, el mismo de la cotización.
+        codigoRepuesto: z.string().trim().toUpperCase().min(1).max(50),
+        descripcion: z.string().trim().max(200).optional(),
         cantidad: z.number().int().min(1),
         tienda: z.string().trim().min(2).max(120),
         precioUnitario: z.number().min(0),
@@ -54,13 +55,20 @@ export async function construirCotizacion(gestor: EntityManager, orden: Orden): 
       taller: NOMBRE_TALLER,
       sede: orden.taller.nombre,
       cliente: { cedula: orden.relacion.cedula, nombre: orden.relacion.cliente, telefono: orden.relacion.telefono },
-      vehiculo: { vin: orden.relacion.vin, placa: orden.relacion.placa, descripcion: descripcionVehiculo(orden.relacion) },
+      vehiculo: {
+        vin: orden.relacion.vin,
+        placa: orden.relacion.placa,
+        marca: orden.relacion.cabeceraVin.marca,
+        modelo: orden.relacion.cabeceraVin.modelo,
+        anio: orden.relacion.cabeceraVin.anio,
+        descripcion: descripcionVehiculo(orden.relacion),
+      },
     },
     tareas,
   );
 }
 
-// Se envía a facturación: mano de obra con precio y, si hacen falta, repuestos por código.
+// Se envía a facturación: mano de obra con precio y, si hacen falta, los repuestos por código.
 export async function enviarCotizacion(tx: EntityManager, orden: Orden) {
   const cotizacion = await construirCotizacion(tx, orden);
   await tx.update(Orden, orden.id, { cotizacionRef: `COT-${cotizacion.codigo}` });

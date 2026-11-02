@@ -2,7 +2,7 @@
   "mcpServers": {
     "taller": {
       "type": "http",
-      "url": "http://localhost:3001/mcp",
+      "url": "http://localhost:3417/mcp",
       "headers": {
         "Authorization": "Bearer ${TALLER_MCP_TOKEN}"
       }

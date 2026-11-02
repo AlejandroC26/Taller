@@ -7,6 +7,7 @@ import * as usuarios from '@/usuarios/usuarios.service';
 import { GET as verEvidencia } from '../evidencias/[id]/route';
 import { POST as subirEvidencia } from './[codigo]/evidencias/route';
 import { POST as remitir } from './[codigo]/remitir/route';
+import { GET as repuestosTienda } from './[codigo]/repuestos-tienda/route';
 import { POST as tomar } from './[codigo]/tomar/route';
 import { GET } from './route';
 
@@ -16,7 +17,10 @@ vi.mock('@/ordenes/ordenes.service', async (original) => ({
   listarOrdenes: vi.fn(async () => []),
   tomarOrden: vi.fn(async () => ({ codigo: 'OT-0001', estado: 'en_diagnostico' })),
 }));
-vi.mock('@/diagnosticos/diagnosticos.service', () => ({ remitirOrden: vi.fn(async () => ({ estado: 'remitida' })) }));
+vi.mock('@/diagnosticos/diagnosticos.service', () => ({
+  remitirOrden: vi.fn(async () => ({ estado: 'remitida' })),
+  buscarRepuestosParaOrden: vi.fn(async () => ({ repuestos: [], sin_respuesta: [] })),
+}));
 vi.mock('@/diagnosticos/evidencias.service', () => ({
   guardarEvidencia: vi.fn(async () => ({ id: 1 })),
   listarEvidencias: vi.fn(async () => []),
@@ -48,6 +52,14 @@ describe('rutas del mecánico', () => {
     expect((await remitir(peticion('/x', { metodo: 'POST', cuerpo: { taller: 'PL-FRENOS' } }), p())).status).toBe(400);
     await remitir(peticion('/x', { metodo: 'POST', cuerpo: { taller: 'PL-FRENOS', nota: 'Ruido en la rueda delantera' } }), p());
     expect(diagnosticos.remitirOrden).toHaveBeenCalledWith(expect.anything(), 'OT-0001', 'PL-FRENOS', 'Ruido en la rueda delantera');
+  });
+
+  it('busca en el catálogo de la tienda por texto y categoría', async () => {
+    comoRol('mecanico');
+    expect((await repuestosTienda(peticion('/x?texto=pastillas&categoria=Frenos'), p())).status).toBe(200);
+    expect(diagnosticos.buscarRepuestosParaOrden).toHaveBeenCalledWith(expect.anything(), 'OT-0001', { texto: 'pastillas', categoria: 'Frenos', refrescar: false });
+    await repuestosTienda(peticion('/x?refrescar=true'), p());
+    expect(diagnosticos.buscarRepuestosParaOrden).toHaveBeenLastCalledWith(expect.anything(), 'OT-0001', { texto: undefined, categoria: undefined, refrescar: true });
   });
 
   it('sube la evidencia como multipart y pasa los bytes al service', async () => {

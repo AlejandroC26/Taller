@@ -6,19 +6,25 @@ import { DESTINOS, EventoIntegracion } from './evento.entity';
 import type { Destino } from './evento.entity';
 
 export const MAXIMO_INTENTOS = 5;
+// Facturación tarda de 20 a 35 s en dar el acuse de crear_cotizacion (le pregunta a la
+// tienda antes de responder). La bandeja trabaja en segundo plano: se le da margen.
+export const TIEMPO_ENVIO_MS = 90_000;
 
 export type CambioEvento = Partial<Pick<EventoIntegracion, 'estado' | 'intentos' | 'enviadoEn' | 'ultimoError' | 'respuesta'>>;
 
-type Llamar = (destino: Destino, herramienta: string, datos: Record<string, unknown>) => Promise<unknown>;
+type Llamar = (destino: Destino, herramienta: string, datos: Record<string, unknown>, tiempoMs?: number) => Promise<unknown>;
+
+// El mismo en cada reintento del evento: así el otro sistema no lo procesa dos veces.
+export const idMensajeDe = (evento: Pick<EventoIntegracion, 'id' | 'herramienta'>) => `taller-${evento.id}-${evento.herramienta}`;
 
 // Qué le pasa a un evento después de un intento de envío. Sin MCP configurado queda
 // desactivado (no es un error: el otro proyecto todavía no existe).
 export async function intentarEnvio(
-  evento: Pick<EventoIntegracion, 'destino' | 'herramienta' | 'datos' | 'intentos'>,
+  evento: Pick<EventoIntegracion, 'id' | 'destino' | 'herramienta' | 'datos' | 'intentos'>,
   llamar: Llamar,
 ): Promise<CambioEvento> {
   try {
-    const respuesta = await llamar(evento.destino, evento.herramienta, evento.datos);
+    const respuesta = await llamar(evento.destino, evento.herramienta, { ...evento.datos, id_mensaje: idMensajeDe(evento) }, TIEMPO_ENVIO_MS);
     return { estado: 'enviado', intentos: evento.intentos + 1, respuesta: respuesta === undefined ? null : JSON.stringify(respuesta), enviadoEn: new Date(), ultimoError: null };
   } catch (error) {
     const mensaje = (error as Error).message;

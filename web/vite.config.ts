@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 
 // La web habla con la API por el mismo origen: Vite reenvía /api y /mcp a Next.
-const API = process.env.TALLER_API_URL ?? 'http://localhost:3001';
+const API = process.env.TALLER_API_URL ?? 'http://localhost:3417';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

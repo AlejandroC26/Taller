@@ -1,6 +1,7 @@
 import { invalido } from '../comun/errores';
 import type { Causa } from '../garantias/reglas';
 import { requiereEvidencia } from '../garantias/reglas';
+import { sinTildes } from '../prediagnostico/reglas';
 
 // Reglas puras del diagnóstico y de sus evidencias.
 
@@ -61,3 +62,23 @@ export function exigirListoParaFinalizar(tareas: TareaParaFinalizar[], porGarant
     throw invalido('La orden vino por garantía: adjunte al menos una evidencia que respalde el dictamen');
   }
 }
+
+// Busca en el catálogo de las tiendas por texto (código, nombre o categoría, sin tildes) y
+// por categoría exacta. El catálogo se filtra aquí: a la tienda se le pide una sola vez.
+export function filtrarCatalogo<T extends { codigo_repuesto: string; nombre: string; categoria: string }>(
+  repuestos: T[],
+  texto?: string,
+  categoria?: string,
+): T[] {
+  const busca = sinTildes(texto?.trim() ?? '');
+  const cat = sinTildes(categoria?.trim() ?? '');
+  return repuestos.filter(
+    (r) =>
+      (!cat || sinTildes(r.categoria) === cat) &&
+      (!busca || sinTildes(`${r.codigo_repuesto} ${r.nombre} ${r.categoria}`).includes(busca)),
+  );
+}
+
+// Las categorías del catálogo, para el filtro de la web.
+export const categoriasDe = (repuestos: { categoria: string }[]) =>
+  [...new Set(repuestos.map((r) => r.categoria).filter(Boolean))].sort((a, b) => a.localeCompare(b));

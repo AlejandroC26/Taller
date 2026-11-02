@@ -6,7 +6,7 @@ export const CARPETA = import.meta.dirname;
 for (const archivo of [join(CARPETA, '..', '.env.local'), join(CARPETA, '..', '..', '..', '.env')]) {
   try { process.loadEnvFile(archivo); } catch {}
 }
-export const BASE = process.env.TALLER_API_URL ?? 'http://localhost:3001';
+export const BASE = process.env.TALLER_API_URL ?? 'http://localhost:3417';
 
 // Los tokens se guardan en archivos ocultos de esta carpeta (están en .gitignore).
 const archivo = (tipo) => join(CARPETA, `.token-${tipo}`);

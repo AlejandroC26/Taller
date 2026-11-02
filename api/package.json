@@ -5,9 +5,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev -p 3001",
+    "dev": "next dev -p 3417",
     "build": "next build",
-    "start": "next start -p 3001",
+    "start": "next start -p 3417",
     "tipos": "tsc --noEmit",
     "migracion:generar": "tsx node_modules/typeorm/cli.js migration:generate -d src/base-datos/fuente.ts",
     "migracion:correr": "tsx node_modules/typeorm/cli.js migration:run -d src/base-datos/fuente.ts",

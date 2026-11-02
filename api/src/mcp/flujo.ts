@@ -1,6 +1,6 @@
 import { NOMBRE_TALLER } from '../config';
 import { CAUSAS, NOMBRE_CAUSA, dictamenSugerido, pagadorPorCausa } from '../garantias/reglas';
-import { CONTRATO } from '../integraciones/contrato';
+import { CONTRATO, CONTRATO_TIENDAS } from '../integraciones/contrato';
 import { ESTADOS, PASOS, SIGUIENTE } from '../ordenes/reglas';
 
 // La descripción del flujo sale del código (estados, transiciones, pasos y contrato), así
@@ -41,6 +41,7 @@ export function describirFlujo() {
     })),
     herramientas_del_taller_por_agente: ENTRANTES,
     lo_que_el_taller_envia: CONTRATO,
+    lo_que_el_taller_consulta_en_las_tiendas: CONTRATO_TIENDAS,
   };
 }
 
@@ -82,6 +83,11 @@ export function contratoMarkdown(): string {
       ...Object.entries(c.herramientas).map(([h, d]) => `- \`${h}\` ${d}`),
     ]),
     '',
+    '### tiendas',
+    CONTRATO_TIENDAS.descripcion,
+    ...Object.entries(CONTRATO_TIENDAS.herramientas).map(([h, d]) => `- \`${h}\` ${d}`),
+    '',
     'Se configuran con MCP_<DESTINO>_URL y MCP_<DESTINO>_TOKEN. Sin URL, el concesionario es el simulado y los mensajes a facturación quedan en la bandeja (consultar_bandeja).',
+    'Las tiendas, con MCP_TIENDA_<N>_URL, _TOKEN y _NOMBRE (N = 1…9). Sin ninguna, se usa la tienda simulada.',
   ].join('\n');
 }

@@ -123,6 +123,15 @@ export interface Evidencia {
   url: string;
 }
 
+// Un repuesto que el mecánico eligió del catálogo, por su código universal.
+export interface RepuestoPedido {
+  id: number;
+  codigo_repuesto: string;
+  descripcion: string;
+  categoria: string;
+  cantidad: number;
+}
+
 export interface ServicioDiagnostico {
   id: number;
   posicion: number;
@@ -136,7 +145,7 @@ export interface ServicioDiagnostico {
   garantia: { aplica: boolean; motivo: string; valida: boolean | null; respuesta: string | null; pagador: Pagador };
   completada: boolean;
   fija: boolean;
-  repuestos: { id: number; codigo_repuesto: string; descripcion: string; cantidad: number }[];
+  repuestos: RepuestoPedido[];
   evidencias: Evidencia[];
 }
 
@@ -191,10 +200,24 @@ export interface Servicio {
   activo: boolean;
 }
 
-export interface CodigoRepuesto {
-  codigo: string;
-  descripcion: string;
-  sistema: string;
+// Un repuesto del catálogo de la tienda, por código universal y sin precio (el precio es de
+// facturación). Las unidades disponibles son solo informativas.
+export interface RepuestoCatalogo {
+  codigo_repuesto: string;
+  nombre: string;
+  categoria: string;
+  marcas: string[];
+  unidades_disponibles: number;
+  tiendas: string[];
+}
+
+export interface BusquedaRepuestos {
+  orden: string;
+  tiendas: string[];
+  sin_respuesta: string[];
+  actualizado_en: string | null;
+  categorias: string[];
+  repuestos: RepuestoCatalogo[];
 }
 
 export interface Usuario {

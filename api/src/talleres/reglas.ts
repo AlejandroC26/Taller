@@ -32,6 +32,10 @@ const minutos = (hora: string) => {
 const aHora = (total: number) =>
   `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 
+// Un instante en ISO 8601 con la hora de Colombia: 2026-11-03T08:00:00-05:00.
+export const isoColombia = (instante: Date | string) =>
+  `${new Date(new Date(instante).getTime() - 5 * 3_600_000).toISOString().slice(0, 19)}${ZONA}`;
+
 // Fecha AAAA-MM-DD en Colombia de un instante ISO.
 export const fechaLocal = (iso: string) => new Date(new Date(iso).getTime() - 5 * 3_600_000).toISOString().slice(0, 10);
 

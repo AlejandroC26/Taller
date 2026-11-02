@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useParams } from 'react-router';
 import { api } from '../api/cliente';
-import type { CodigoRepuesto, LineaCompra, OrdenDetalle, Reparacion } from '../api/tipos';
+import type { LineaCompra, OrdenDetalle, Reparacion } from '../api/tipos';
 import { Boton } from '../componentes/Boton';
 import { aNumero, Entrada, Seleccion } from '../componentes/Campos';
 import { Etiqueta, EstadoOrden } from '../componentes/Etiqueta';
@@ -53,13 +53,14 @@ function FormularioHoras({ rep, alGuardar }: { rep: Reparacion; alGuardar: (cuer
   );
 }
 
-// Lo que se usó y gastó: código universal y cantidad (desde la compra o a mano).
+// Lo que se usó y gastó: SKU de la tienda y cantidad (desde la compra o a mano). Las
+// sugerencias son las líneas de la orden de compra.
 export function FormularioParte({
-  codigos,
+  sugerencias,
   desde,
   alGuardar,
 }: {
-  codigos: CodigoRepuesto[];
+  sugerencias: LineaCompra[];
   desde: LineaCompra | null;
   alGuardar: (cuerpo: object) => Promise<unknown>;
 }) {
@@ -88,20 +89,20 @@ export function FormularioParte({
       >
         <h2 className="text-subheading sm:col-span-3">Parte usada</h2>
         <datalist id="codigos-usados">
-          {codigos.map((c) => (
-            <option key={c.codigo} value={c.codigo}>
+          {sugerencias.map((c) => (
+            <option key={c.id} value={c.codigo_repuesto}>
               {c.descripcion}
             </option>
           ))}
         </datalist>
         <Entrada
-          etiqueta="Código universal"
+          etiqueta="SKU de la tienda"
           list="codigos-usados"
           value={codigo}
           onChange={(e) => {
             const v = e.target.value.toUpperCase();
             setCodigo(v);
-            setDescripcion(codigos.find((c) => c.codigo === v)?.descripcion ?? descripcion);
+            setDescripcion(sugerencias.find((c) => c.codigo_repuesto === v)?.descripcion ?? descripcion);
           }}
           required
         />
@@ -127,7 +128,6 @@ export function ReparacionPagina() {
   const ruta = `/api/ordenes/${codigo}/reparacion`;
   const rep = usarDatos<Reparacion>(ruta);
   const orden = usarDatos<OrdenDetalle>(`/api/ordenes/${codigo}`);
-  const { datos: codigos } = usarDatos<CodigoRepuesto[]>('/api/codigos-repuesto');
   const [desdeCompra, setDesdeCompra] = useState<LineaCompra | null>(null);
   const { ocupado, error, ejecutar } = usarAccion();
 
@@ -180,7 +180,7 @@ export function ReparacionPagina() {
 
           <section>
             <Ceja className="mb-12">Orden de compra (facturación)</Ceja>
-            <Tabla columnas={['Código', 'Repuesto', 'Cant.', 'Tienda', 'Precio', 'Paga', '']} vacia="Sin repuestos que comprar: solo mano de obra">
+            <Tabla columnas={['SKU', 'Repuesto', 'Cant.', 'Tienda', 'Precio', 'Paga', '']} vacia="Sin repuestos que comprar: solo mano de obra">
               {r.orden_compra.map((c) => (
                 <Fila key={c.id}>
                   <Celda className="mono whitespace-nowrap">{c.codigo_repuesto}</Celda>
@@ -204,7 +204,7 @@ export function ReparacionPagina() {
           {trabaja && (
             <FormularioParte
               key={desdeCompra?.id ?? 'manual'}
-              codigos={codigos ?? []}
+              sugerencias={r.orden_compra}
               desde={desdeCompra}
               alGuardar={async (cuerpo) => {
                 await actualizar(api(`${ruta}/partes`, { metodo: 'POST', cuerpo }));
@@ -214,7 +214,7 @@ export function ReparacionPagina() {
           )}
           <section>
             <Ceja className="mb-12">Partes usadas</Ceja>
-            <Tabla columnas={['Código', 'Parte', 'Cant.', 'Tienda', 'Nota']} vacia="Todavía no se registra ninguna parte usada">
+            <Tabla columnas={['SKU', 'Parte', 'Cant.', 'Tienda', 'Nota']} vacia="Todavía no se registra ninguna parte usada">
               {r.partes_usadas.map((p) => (
                 <Fila key={p.id}>
                   <Celda className="mono whitespace-nowrap">{p.codigo_repuesto}</Celda>

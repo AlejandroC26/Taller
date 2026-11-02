@@ -1,25 +1,30 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { abrirArchivo, api, subirArchivo } from '../api/cliente';
 import { CAUSAS } from '../api/tipos';
-import type { Causa, CodigoRepuesto, Diagnostico, Evidencia, OrdenDetalle, Sede, Servicio, ServicioDiagnostico } from '../api/tipos';
+import type { BusquedaRepuestos, Causa, Diagnostico, Evidencia, OrdenDetalle, RepuestoCatalogo, Sede, Servicio, ServicioDiagnostico } from '../api/tipos';
 import { Boton } from '../componentes/Boton';
 import { aNumero, Area, Entrada, Seleccion } from '../componentes/Campos';
 import { Etiqueta, EstadoOrden } from '../componentes/Etiqueta';
 import { FichaOrden } from '../componentes/FichaOrden';
 import { Aviso, Cargando, Ceja, Encabezado, Metrica, Tarjeta, Ventana } from '../componentes/Superficies';
+import { Celda, Fila, Tabla } from '../componentes/Tabla';
 import { totalManoObra } from '../logica/costos';
 import { cuenta, dictamenSugerido, NOMBRE_CAUSA, NOMBRE_ESPECIALIDAD, NOMBRE_PAGADOR, pesos } from '../logica/formato';
 import { puede } from '../logica/permisos';
 import { usarAccion, usarDatos } from '../logica/usarDatos';
 import { usarSesion } from '../sesion/sesion';
 
-// En el formulario los números viven como texto, tal como se escriben.
+// En el formulario los números viven como texto, tal como se escriben. El repuesto se
+// identifica por su código universal; nombre y categoría son para mostrarlo. disponibles
+// solo se conoce si se eligió en esta sesión (sirve para avisar, no para impedir).
 export interface RepuestoForm {
   clave: string;
   codigo: string;
-  descripcion: string;
+  nombre: string;
+  categoria: string;
   cantidad: string;
+  disponibles?: number;
 }
 export interface ServicioForm {
   clave: string;
@@ -48,11 +53,18 @@ export const aFormulario = (servicios: ServicioDiagnostico[]): ServicioForm[] =>
       causa: s.causa ?? '',
       aplica: s.garantia.aplica,
       motivo: s.garantia.motivo,
-      repuestos: s.repuestos.map((r) => ({ clave: nuevaClave(), codigo: r.codigo_repuesto, descripcion: r.descripcion, cantidad: String(r.cantidad) })),
+      repuestos: s.repuestos.map((r) => ({
+        clave: nuevaClave(),
+        codigo: r.codigo_repuesto,
+        nombre: r.descripcion,
+        categoria: r.categoria,
+        cantidad: String(r.cantidad),
+      })),
       evidencias: s.evidencias,
     }));
 
-// Lo que se envía a PUT /api/ordenes/:codigo/diagnostico. Los repuestos van sin precio.
+// Lo que se envía a PUT /api/ordenes/:codigo/diagnostico. Los repuestos van sin precio:
+// solo el código universal y la cantidad.
 export const aCuerpo = (observaciones: string, servicios: ServicioForm[]) => ({
   observaciones,
   tareas: servicios.map((s) => ({
@@ -62,9 +74,7 @@ export const aCuerpo = (observaciones: string, servicios: ServicioForm[]) => ({
     causa: s.causa || null,
     garantiaAplica: s.causa ? s.aplica : false,
     garantiaMotivo: s.motivo.trim(),
-    repuestos: s.repuestos
-      .filter((r) => r.codigo.trim())
-      .map((r) => ({ codigoRepuesto: r.codigo.trim().toUpperCase(), ...(r.descripcion.trim() ? { descripcion: r.descripcion.trim() } : {}), cantidad: aNumero(r.cantidad) })),
+    repuestos: s.repuestos.map((r) => ({ codigoRepuesto: r.codigo, cantidad: aNumero(r.cantidad) })),
   })),
 });
 
@@ -114,10 +124,119 @@ function ListaEvidencias({ evidencias }: { evidencias: Evidencia[] }) {
   );
 }
 
+export interface FiltroRepuestos {
+  texto: string;
+  categoria: string;
+  refrescar?: boolean;
+}
+
+const hora = (iso: string) => new Date(iso).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+
+// Busca en el catálogo de la tienda por código universal. Sin precios: los consigue
+// facturación. El catálogo se carga al abrir y el taller lo guarda unos minutos.
+export function BuscadorRepuestos({
+  buscar,
+  alElegir,
+  alCerrar,
+}: {
+  buscar: (filtro: FiltroRepuestos) => Promise<BusquedaRepuestos>;
+  alElegir: (r: RepuestoCatalogo) => void;
+  alCerrar: () => void;
+}) {
+  const [texto, setTexto] = useState('');
+  const [categoria, setCategoria] = useState('');
+  const [resultado, setResultado] = useState<BusquedaRepuestos | null>(null);
+  const { ocupado, error, ejecutar } = usarAccion();
+  const consultar = async (filtro: Partial<FiltroRepuestos> = {}) => {
+    const r = await ejecutar(() => buscar({ texto: texto.trim(), categoria, ...filtro }));
+    if (r) setResultado(r);
+  };
+  // Al abrir se carga el catálogo completo: de ahí salen las categorías.
+  useEffect(() => {
+    void consultar();
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-12 rounded-xl border border-borde bg-lienzo p-16">
+      <div className="flex flex-wrap items-center justify-between gap-8">
+        <Ceja>Catálogo de la tienda</Ceja>
+        <Boton variante="suave" onClick={alCerrar}>
+          Cerrar
+        </Boton>
+      </div>
+      <form
+        className="flex flex-wrap items-end gap-12"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void consultar();
+        }}
+      >
+        <div className="min-w-0 flex-1 basis-[160px]">
+          <Seleccion
+            etiqueta="Categoría"
+            value={categoria}
+            onChange={(e) => {
+              setCategoria(e.target.value);
+              void consultar({ categoria: e.target.value });
+            }}
+          >
+            <option value="">Todas</option>
+            {(resultado?.categorias ?? []).map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </Seleccion>
+        </div>
+        <div className="min-w-0 flex-[2] basis-[200px]">
+          <Entrada etiqueta="Buscar repuesto" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Pastillas, filtro, PAS-DEL-CER…" />
+        </div>
+        <Boton type="submit" variante="azul" disabled={ocupado}>
+          {ocupado ? 'Buscando…' : 'Buscar en la tienda'}
+        </Boton>
+      </form>
+      {error && <Aviso>{error}</Aviso>}
+      {ocupado && !resultado && <p className="text-body-sm text-texto-2">Pidiendo el catálogo a la tienda; puede tardar unos segundos…</p>}
+      {resultado && (
+        <p className="flex flex-wrap items-center gap-8 text-[12px] text-texto-2">
+          {resultado.sin_respuesta.length > 0 ? (
+            <span>No respondió: {resultado.sin_respuesta.join(', ')}. Se muestra el último catálogo guardado.</span>
+          ) : (
+            <span>{resultado.actualizado_en ? `Catálogo de las ${hora(resultado.actualizado_en)}.` : 'Catálogo de la tienda.'}</span>
+          )}
+          <button type="button" className="cursor-pointer font-semibold text-texto underline" disabled={ocupado} onClick={() => void consultar({ refrescar: true })}>
+            Actualizar
+          </button>
+        </p>
+      )}
+      {resultado && (
+        <Tabla columnas={['Código', 'Repuesto', 'Marcas', 'Disponibles', '']} vacia="Nada con ese filtro: pruebe otra categoría u otro texto">
+          {resultado.repuestos.map((r) => (
+            <Fila key={r.codigo_repuesto}>
+              <Celda className="mono whitespace-nowrap text-texto-2">{r.codigo_repuesto}</Celda>
+              <Celda>
+                <p className="font-semibold">{r.nombre}</p>
+                <p className="text-[12px] text-texto-2">{r.categoria}</p>
+              </Celda>
+              <Celda className="text-texto-2">{r.marcas.join(', ')}</Celda>
+              <Celda>{r.unidades_disponibles}</Celda>
+              <Celda className="text-right">
+                <Boton variante="suave" onClick={() => alElegir(r)} aria-label={`Agregar ${r.nombre}`}>
+                  Agregar
+                </Boton>
+              </Celda>
+            </Fila>
+          ))}
+        </Tabla>
+      )}
+    </div>
+  );
+}
+
 export function EditorDiagnostico({
   inicial,
   catalogo,
-  codigos,
+  buscarRepuestos,
   sedesRemision,
   alGuardar,
   alFinalizar,
@@ -126,7 +245,7 @@ export function EditorDiagnostico({
 }: {
   inicial: Diagnostico;
   catalogo: Servicio[];
-  codigos: CodigoRepuesto[];
+  buscarRepuestos: (filtro: FiltroRepuestos) => Promise<BusquedaRepuestos>;
   sedesRemision: Sede[];
   alGuardar: (cuerpo: ReturnType<typeof aCuerpo>) => Promise<Diagnostico>;
   alFinalizar: () => Promise<unknown>;
@@ -143,11 +262,13 @@ export function EditorDiagnostico({
   const [remitiendo, setRemitiendo] = useState(false);
   const [sedeRemision, setSedeRemision] = useState('');
   const [nota, setNota] = useState('');
+  // El servicio que tiene abierto el buscador de repuestos.
+  const [buscandoEn, setBuscandoEn] = useState<string | null>(null);
   const { ocupado, error, ejecutar } = usarAccion();
   const fijas = inicial.servicios.filter((s) => s.fija);
   const precioDe = (sku: string) => catalogo.find((c) => c.sku === sku)?.precio_mano_obra ?? 0;
   const total = totalManoObra([...fijas.map((f) => ({ precio: f.precio })), ...servicios.map((s) => ({ precio: precioDe(s.sku) }))]);
-  const repuestos = servicios.reduce((s, x) => s + x.repuestos.filter((r) => r.codigo.trim()).length, 0);
+  const repuestos = servicios.reduce((s, x) => s + x.repuestos.length, 0);
 
   const cambiar = (clave: string, cambio: Partial<ServicioForm>) => {
     setGuardado(false);
@@ -155,6 +276,17 @@ export function EditorDiagnostico({
   };
   const cambiarRepuesto = (s: ServicioForm, clave: string, cambio: Partial<RepuestoForm>) =>
     cambiar(s.clave, { repuestos: s.repuestos.map((r) => (r.clave === clave ? { ...r, ...cambio } : r)) });
+  // Elegir dos veces el mismo repuesto suma una unidad en vez de repetir la línea.
+  const elegirRepuesto = (s: ServicioForm, r: RepuestoCatalogo) => {
+    const igual = s.repuestos.find((x) => x.codigo === r.codigo_repuesto);
+    if (igual) return cambiarRepuesto(s, igual.clave, { cantidad: String(aNumero(igual.cantidad) + 1) });
+    cambiar(s.clave, {
+      repuestos: [
+        ...s.repuestos,
+        { clave: nuevaClave(), codigo: r.codigo_repuesto, nombre: r.nombre, categoria: r.categoria, cantidad: '1', disponibles: r.unidades_disponibles },
+      ],
+    });
+  };
 
   // Guarda y vuelve a armar el formulario con lo que respondió la API (así cada servicio
   // nuevo recibe su id y ya puede llevar evidencias).
@@ -175,13 +307,6 @@ export function EditorDiagnostico({
   return (
     <div className="grid gap-40 lg:grid-cols-[2fr_1fr]">
       <div className="flex min-w-0 flex-col gap-20">
-        <datalist id="codigos-repuesto">
-          {codigos.map((c) => (
-            <option key={c.codigo} value={c.codigo}>
-              {c.descripcion}
-            </option>
-          ))}
-        </datalist>
         <Tarjeta>
           <Area etiqueta="Observaciones generales" value={observaciones} onChange={(e) => setObservaciones(e.target.value)} placeholder="Qué encontró al revisar el vehículo" />
         </Tarjeta>
@@ -285,30 +410,37 @@ export function EditorDiagnostico({
                     <p className="text-body-sm font-medium">
                       Repuestos a comprar {s.repuestos.length ? `(${s.repuestos.length})` : <span className="text-texto-3">· ninguno</span>}
                     </p>
-                    {s.repuestos.map((r) => (
-                      <div key={r.clave} className="grid gap-12 sm:grid-cols-[minmax(150px,1fr)_2fr_80px_auto] sm:items-end">
-                        <Entrada
-                          etiqueta="Código universal"
-                          list="codigos-repuesto"
-                          value={r.codigo}
-                          onChange={(e) => {
-                            const codigo = e.target.value.toUpperCase();
-                            cambiarRepuesto(s, r.clave, { codigo, descripcion: codigos.find((c) => c.codigo === codigo)?.descripcion ?? r.descripcion });
-                          }}
-                          placeholder="PAS-DEL-CER"
-                        />
-                        <Entrada etiqueta="Descripción" value={r.descripcion} onChange={(e) => cambiarRepuesto(s, r.clave, { descripcion: e.target.value })} />
-                        <Entrada etiqueta="Cantidad" type="number" min={1} value={r.cantidad} onChange={(e) => cambiarRepuesto(s, r.clave, { cantidad: e.target.value })} />
-                        <Boton variante="suave" onClick={() => cambiar(s.clave, { repuestos: s.repuestos.filter((x) => x.clave !== r.clave) })}>
-                          Quitar
+                    {s.repuestos.length > 0 && (
+                      <ul className="flex flex-col gap-8" aria-label={`Repuestos del servicio ${i + 1}`}>
+                        {s.repuestos.map((r) => (
+                          <li key={r.clave} className="grid items-end gap-12 rounded-xl border border-borde p-12 sm:grid-cols-[1fr_90px_auto]">
+                            <div className="min-w-0 self-center">
+                              <p className="font-semibold">{r.nombre}</p>
+                              <p className="text-[12px] text-texto-2">
+                                <span className="mono mr-8">{r.codigo}</span>
+                                {r.categoria}
+                              </p>
+                              {r.disponibles !== undefined && aNumero(r.cantidad) > r.disponibles && (
+                                <p className="text-[12px] text-texto-2">La tienda tiene {r.disponibles} disponibles: facturación confirmará si alcanza.</p>
+                              )}
+                            </div>
+                            <Entrada etiqueta="Cantidad" type="number" min={1} value={r.cantidad} onChange={(e) => cambiarRepuesto(s, r.clave, { cantidad: e.target.value })} />
+                            <Boton variante="suave" onClick={() => cambiar(s.clave, { repuestos: s.repuestos.filter((x) => x.clave !== r.clave) })} aria-label={`Quitar ${r.nombre}`}>
+                              Quitar
+                            </Boton>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {buscandoEn === s.clave ? (
+                      <BuscadorRepuestos buscar={buscarRepuestos} alElegir={(r) => elegirRepuesto(s, r)} alCerrar={() => setBuscandoEn(null)} />
+                    ) : (
+                      <div>
+                        <Boton variante="suave" onClick={() => setBuscandoEn(s.clave)}>
+                          + Repuesto
                         </Boton>
                       </div>
-                    ))}
-                    <div>
-                      <Boton variante="suave" onClick={() => cambiar(s.clave, { repuestos: [...s.repuestos, { clave: nuevaClave(), codigo: '', descripcion: '', cantidad: '1' }] })}>
-                        + Repuesto
-                      </Boton>
-                    </div>
+                    )}
                   </div>
                 </Tarjeta>
               </li>
@@ -338,7 +470,7 @@ export function EditorDiagnostico({
       <aside className="flex flex-col gap-20 lg:sticky lg:top-96 lg:self-start">
         <Ventana titulo="Para facturación">
           <Metrica etiqueta="Mano de obra (SKU)" valor={<span data-testid="total">{pesos(total)}</span>} />
-          <Metrica etiqueta="Repuestos" valor={cuenta(repuestos, 'por cotizar', 'por cotizar')} detalle="Facturación busca los precios en las tiendas" />
+          <Metrica etiqueta="Repuestos" valor={cuenta(repuestos, 'por cotizar', 'por cotizar')} detalle="Del catálogo de la tienda; facturación consigue los precios" />
         </Ventana>
         <Boton variante="primario" onClick={guardar} disabled={ocupado}>
           {ocupado ? 'Guardando…' : 'Guardar borrador'}
@@ -453,7 +585,6 @@ export function DiagnosticoPagina() {
   const diag = usarDatos<Diagnostico>(ruta);
   const orden = usarDatos<OrdenDetalle>(`/api/ordenes/${codigo}`);
   const { datos: catalogo } = usarDatos<Servicio[]>('/api/servicios');
-  const { datos: codigos } = usarDatos<CodigoRepuesto[]>('/api/codigos-repuesto');
   const { datos: sedes } = usarDatos<Sede[]>('/api/talleres');
 
   if ((diag.cargando && !diag.datos) || (orden.cargando && !orden.datos)) return <Cargando />;
@@ -480,7 +611,13 @@ export function DiagnosticoPagina() {
         <EditorDiagnostico
           inicial={d}
           catalogo={catalogo ?? []}
-          codigos={codigos ?? []}
+          buscarRepuestos={({ texto, categoria, refrescar }) => {
+            const filtros = new URLSearchParams();
+            if (texto) filtros.set('texto', texto);
+            if (categoria) filtros.set('categoria', categoria);
+            if (refrescar) filtros.set('refrescar', 'true');
+            return api<BusquedaRepuestos>(`/api/ordenes/${codigo}/repuestos-tienda?${filtros}`);
+          }}
           sedesRemision={sedesRemision}
           alGuardar={async (cuerpo) => {
             const r = await api<Diagnostico>(ruta, { metodo: 'PUT', cuerpo });

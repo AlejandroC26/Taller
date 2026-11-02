@@ -16,6 +16,8 @@
 import { randomUUID } from 'node:crypto';
 import {
   cerrarClientes,
+  deLaTienda,
+  facturacionReal,
   despejarRelacion,
   fallar,
   fallidas,
@@ -172,7 +174,12 @@ async function correrCaso(nombre) {
   }
 
   // 5. Diagnóstico: servicios (SKU), causa, dictamen y repuestos; evidencias si hacen falta.
-  let diag = await llamar(mecanico, 'registrar_diagnostico', { codigo, observaciones: 'Simulación', servicios: c.servicios });
+  const servicios = await deLaTienda(mecanico, codigo, c.servicios);
+  let diag = await llamar(mecanico, 'registrar_diagnostico', { codigo, observaciones: 'Simulación', servicios });
+  revisar(
+    diag.servicios.flatMap((s) => s.repuestos).every((r) => r.codigo_repuesto && r.descripcion),
+    'los repuestos se eligieron del catálogo de la tienda',
+  );
   const propios = diag.servicios.filter((s) => !s.fija);
   for (const s of propios) {
     if (s.garantia.aplica) await llamar(mecanico, 'adjuntar_evidencia', { codigo, nombre: `${s.sku}.png`, contenido_base64: PNG, tarea_id: s.id });
@@ -195,17 +202,23 @@ async function correrCaso(nombre) {
   revisar(JSON.stringify(propiosFinal.map((s) => s.garantia.pagador)) === JSON.stringify(c.esperado.pagador), `paga: ${c.esperado.pagador}`);
   if (c.esperado.motivo) revisar(propiosFinal.some((s) => c.esperado.motivo.test(s.garantia.respuesta)), `motivo ${c.esperado.motivo}`);
 
-  // 7. Facturación consulta la cotización (mano de obra con precio; repuestos solo con código).
+  // 7. Facturación consulta la cotización (mano de obra con precio; repuestos por código, sin precio).
   const cot = await llamar('agente-facturacion', 'consultar_cotizacion', { codigo });
   console.log(gris(`    mano de obra: ${cot.mano_obra.map((l) => `${l.sku} ${pesos(l.precio)} (${l.garantia.pagador})`).join(', ')}`));
   console.log(gris(`    repuestos: ${cot.repuestos.map((r) => `${r.cantidad}× ${r.codigo_repuesto}`).join(', ') || 'ninguno: solo mano de obra'}`));
   console.log(gris(`    Telegram al cliente: «${cot.mensaje_garantia}»`));
   revisar(cot.repuestos.every((r) => !('precio' in r)), 'los repuestos van sin precio (lo pone facturación)');
+  revisar(cot.repuestos.every((r) => r.codigo_repuesto && !('repuesto_id' in r)), 'cada repuesto va por código universal');
+  revisar(Boolean(cot.vehiculo.marca && cot.vehiculo.modelo && cot.vehiculo.anio), `vehículo para la tienda: ${cot.vehiculo.marca} ${cot.vehiculo.modelo} ${cot.vehiculo.anio}`);
   if (c.esperado.sinRepuestos) revisar(cot.repuestos.length === 0 && !cot.hay_repuestos, 'solo mano de obra');
   if (c.esperado.skus) revisar(JSON.stringify(cot.mano_obra.map((l) => l.sku)) === JSON.stringify(c.esperado.skus), `cobra ${c.esperado.skus.join(' + ')}`);
   if (c.esperado.mensaje) revisar(c.esperado.mensaje.test(cot.mensaje_garantia), `mensaje ${c.esperado.mensaje}`);
 
   // 8. Respuesta del cliente por Telegram (facturación arma la orden de compra con las tiendas).
+  if (await facturacionReal()) {
+    console.log(gris(`    facturación es la real: ${codigo} queda en_cotizacion hasta que el cliente responda por Telegram`));
+    return codigo;
+  }
   if (c.rechazar) {
     orden = await llamar('agente-facturacion', 'registrar_respuesta_cliente', { codigo, aceptada: false, motivo: 'El cliente no aceptó el valor', id_mensaje: id() });
     orden = await llamar('agente-concesionario', 'registrar_salida', { codigo, id_mensaje: id() });
