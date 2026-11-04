@@ -86,10 +86,10 @@ api/
   src/base-datos/         entidades.ts (lista a mano), opciones.ts, conexion.ts (bd()),
                           fuente.ts (CLI de migraciones), semilla.ts, migraciones/
   src/usuarios/           Rol y Usuario (con sede), claves (scrypt), tokens (jose), actor, service, dto
-  src/talleres/           Taller (sede); reglas.ts (franjas libres, zona horaria -05:00)
+  src/talleres/           Taller (sede), ReservaFranja; reglas.ts (franjas libres, rangos, reservas, zona horaria -05:00)
   src/servicios/          Servicio (SKU con precio fijo)
   src/relaciones/         RelacionVehiculo: copia local de lo que el concesionario dice del id_relacion
-  src/prediagnostico/     agente.ts (modelo local → JSON) y reglas.ts (palabras clave, ruta, sede)
+  src/prediagnostico/     agente.ts (modelo local → JSON), PrediagnosticoGuardado y reglas.ts (palabras clave, ruta, sede, motivo_decision)
   src/ordenes/            Orden, Asignacion; reglas.ts (estados, PASOS, quién ve qué); service (citas, cola,
                           tomar, salida, siguiente_paso)
   src/diagnosticos/       Diagnostico, Tarea (servicio con causa y garantía), Repuesto (código + cantidad),
@@ -162,7 +162,8 @@ web/src/
 
 | Llamada | Quién | Efecto |
 |---|---|---|
-| `agendar_cita` | Concesionario | Crea la orden `agendada` en una franja libre. Lleva los mensajes del cliente y el prediagnóstico, y puede venir `por_garantia`. Un `id_relacion` no puede tener dos órdenes abiertas. |
+| `reservar_franja` | Concesionario | Aparta una franja 10 minutos para un vehículo (`reservas_franja`, RS-0001). Ocupa cupo hasta que vence o se agenda; un vehículo tiene una sola reserva vigente. |
+| `agendar_cita` | Concesionario | Crea la orden `agendada` en una franja libre. Lleva los mensajes del cliente y el prediagnóstico, y puede venir `por_garantia`. Con `id_prediagnostico` usa el guardado sin recalcularlo; con `id_reserva`, la hora y la sede apartadas. Un `id_relacion` no puede tener dos órdenes abiertas. |
 | `tomar_orden` | Mecánico de la sede | La saca de la cola: `agendada` o `remitida` pasan a `en_diagnostico`, y `aprobada` pasa a `en_reparacion`. |
 | `remitir_orden` | Mecánico de mantenimiento | Agrega la tarea fija `REV-GENERAL` (hecha y cobrada) y pasa la orden a `remitida`, en la sede especializada. |
 | `finalizar_diagnostico` | Mecánico | Pasa a `validando_garantia` y le pide la validación al concesionario. **Toda orden se consulta.** |
@@ -183,8 +184,11 @@ web/src/
     - `especializada`: confianza ≥ 0,6 y hay sede con esa especialidad.
     - `revision_general`: si no, va a mantenimiento.
 - Si el modelo no responde o sale del catálogo, se usan las palabras clave del SKU (`fuente: 'reglas'`).
-- **Tiempo:** el modelo tiene `LOCAL_TIEMPO_MS` (8 s por defecto) y la herramienta completa `PLAZO_PREDIAGNOSTICO_MS` (45 s); si se pasa, `isError` con «No se pudo calcular el prediagnóstico a tiempo, intente de nuevo». El concesionario llama mientras el cliente espera en el chat: nunca debe quedar colgado.
-- `fecha_cita` sale en ISO 8601 con `-05:00` (`isoColombia`); `prediagnosticar` y `agendar_cita` publican su `outputSchema` completo (`SALIDA_PREDIAGNOSTICO`, `SALIDA_CITA`).
+- Cada prediagnóstico se guarda en `prediagnosticos` (`id_prediagnostico` PD-0001) con los mensajes, `por_garantia`, `motivo_reclamo` y kilometraje. `agendar_cita` lo reutiliza: la sede que se le dijo al cliente es la de la cita.
+- `enrutar_garantia` es `prediagnosticar` para un reclamo: lee también el motivo y responde `motivo_decision` (`motivoDecision`) y la garantía probable (`garantiaProbable`: `aplica_probable` y `causa_probable` por pistas del texto, `conKilometraje`). Es solo una estimación: la causa la dictamina el mecánico.
+- **Tiempo:** el modelo tiene `LOCAL_TIEMPO_MS` (8 s por defecto, tope `TOPE_MODELO_MS` de 22 s) y la herramienta completa `PLAZO_PREDIAGNOSTICO_MS` (28 s: el concesionario pidió menos de 30 s); si se pasa, `isError` con «No se pudo calcular el prediagnóstico a tiempo, intente de nuevo». El concesionario llama mientras el cliente espera en el chat: nunca debe quedar colgado.
+- `fecha_cita` sale en ISO 8601 con `-05:00` (`isoColombia`); `prediagnosticar`, `enrutar_garantia`, `consultar_disponibilidad`, `reservar_franja` y `agendar_cita` publican su `outputSchema` completo (`SALIDA_PREDIAGNOSTICO`, `SALIDA_DISPONIBILIDAD`, `SALIDA_RESERVA`, `SALIDA_CITA`).
+- **Disponibilidad:** las citas no canceladas y las reservas vigentes de otros vehículos ocupan cupo. Con `desde`/`hasta` (hasta 14 días, `diasDelRango`) solo salen las franjas libres; con `fecha`, todas.
 
 **Costos:**
 - **Mano de obra** = Σ precio fijo del SKU de cada servicio. La revisión general se cobra junto con la especialidad.
@@ -299,7 +303,7 @@ acepta también el token fijo del usuario `agente-compartido` (rol `agente`, sin
 | Grupo | Herramientas |
 |---|---|
 | Orquestador | `describir_flujo`, `estado_orden`, `listar_ordenes` |
-| Concesionario | `listar_talleres`, `prediagnosticar`, `consultar_disponibilidad`, `agendar_cita`, `cancelar_cita` (`destructiveHint`), `consultar_evidencias`, `registrar_resultado_garantia` |
+| Concesionario | `listar_talleres`, `prediagnosticar`, `enrutar_garantia`, `consultar_disponibilidad`, `reservar_franja`, `agendar_cita`, `cancelar_cita` (`destructiveHint`), `consultar_evidencias`, `registrar_resultado_garantia` |
 | Facturación | `consultar_cotizacion`, `registrar_respuesta_cliente`, `registrar_pago` |
 | Mecánico | `mis_ordenes`, `tomar_orden`, `consultar_diagnostico`, `registrar_diagnostico`, `adjuntar_evidencia` (base64), `remitir_orden`, `finalizar_diagnostico`, `consultar_reparacion`, `registrar_horas`, `registrar_parte_usada`, `marcar_tarea`, `terminar_reparacion`, `consultar_servicios`, `buscar_repuestos_tienda` |
 | Administración | `registrar_taller`, `actualizar_taller`, `registrar_servicio`, `registrar_salida`, `consultar_bandeja`, `reintentar_envios` |

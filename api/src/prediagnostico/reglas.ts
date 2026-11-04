@@ -112,3 +112,40 @@ export const resumenPorReglas = (texto: string, especialidad: Especialidad, conf
   confianza === 0
     ? 'El cliente no describe una falla clara: requiere revisión general.'
     : `Por lo que cuenta el cliente («${texto.slice(0, 140)}»), apunta a ${especialidad.replace('_', ' ')}.`;
+
+// ---------- Prediagnóstico guardado ----------
+
+export const codigoPrediagnostico = (id: number) => 'PD-' + String(id).padStart(4, '0');
+
+// Acepta PD-0001, pd-1, PD1 o solo el número.
+export function numeroPrediagnostico(codigo: string): number | null {
+  const numero = Number(/^(?:PD-?)?(\d{1,9})$/i.exec(String(codigo).trim())?.[1]);
+  return numero > 0 ? numero : null;
+}
+
+const NOMBRE_ESPECIALIDAD: Record<Especialidad, string> = {
+  mantenimiento_general: 'mantenimiento general',
+  frenos: 'frenos',
+  suspension: 'suspensión',
+  motor: 'motor',
+  electrico: 'sistema eléctrico',
+  transmision: 'transmisión',
+};
+
+// Una o dos frases que el concesionario le puede mostrar al cliente: por qué va a esa sede.
+export function motivoDecision(
+  pre: Pick<Prediagnostico, 'ruta' | 'especialidad' | 'confianza'>,
+  sede: { nombre: string } | null,
+  servicios: string[] = [],
+): string {
+  if (!sede) return 'Por ahora no hay una sede activa para recibir el vehículo.';
+  const area = NOMBRE_ESPECIALIDAD[pre.especialidad];
+  if (pre.ruta === 'especializada') {
+    const detalle = servicios.length ? ` (${servicios.slice(0, 2).join(', ').toLowerCase()})` : '';
+    return `Lo que cuenta el cliente apunta a ${area}${detalle}. Por eso va directo a ${sede.nombre}, la sede especialista.`;
+  }
+  if (pre.especialidad !== 'mantenimiento_general' && pre.confianza >= UMBRAL_ESPECIALIZADA) {
+    return `Lo que cuenta el cliente apunta a ${area}, pero hoy no hay una sede especialista activa para eso. Por eso va a revisión general en ${sede.nombre}.`;
+  }
+  return `Con lo que cuenta el cliente no hay una especialidad clara. Por eso va primero a revisión general en ${sede.nombre}; si hace falta, desde ahí lo remiten a la sede especialista.`;
+}

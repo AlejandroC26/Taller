@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { concesionarioSimulado } from '../integraciones/concesionario/simulado/simulado';
 import { cabeceraSimulada, RELACIONES } from '../integraciones/concesionario/simulado/datos';
-import { coberturaDe, decidirComoConcesionario, dictamenSugerido, pagadorPorCausa, requiereEvidencia } from './reglas';
+import { causaProbable, coberturaDe, conKilometraje, decidirComoConcesionario, dictamenSugerido, garantiaProbable, pagadorPorCausa, requiereEvidencia } from './reglas';
 import type { ServicioAValidar } from './reglas';
 
 const hoy = new Date('2026-10-26T12:00:00Z');
@@ -99,5 +99,31 @@ describe('concesionario simulado', () => {
       servicios: [servicio()],
     });
     expect(r).toEqual([{ tareaId: 1, valida: false, motivo: expect.stringContaining('venció') }]);
+  });
+});
+
+describe('garantía probable antes de ver el carro', () => {
+  const vigente = { vigente: true, vence: '2028-03-14', kmMaximo: 60_000, cubre: ['frenos', 'motor'] as ('frenos' | 'motor')[] };
+
+  it('la causa probable sale de las pistas de lo que cuenta el cliente', () => {
+    expect(causaProbable('Los frenos chillan mucho desde hace una semana')).toBe('desgaste_normal');
+    expect(causaProbable('Falla desde que lo compré, viene de fábrica')).toBe('defecto_fabrica');
+    expect(causaProbable('Después del servicio en otro taller quedó sonando')).toBe('mala_instalacion_taller');
+    expect(causaProbable('Me chocaron y ahora vibra')).toBe('manipulacion_cliente');
+    expect(causaProbable('Hace un ruido raro')).toBeNull();
+  });
+
+  it('aplica si está vigente, cubre el sistema y la causa no la excluye', () => {
+    expect(garantiaProbable(vigente, 'motor', 'falla desde nuevo')).toMatchObject({ aplica_probable: true, causa_probable: 'defecto_fabrica' });
+    expect(garantiaProbable(vigente, 'motor', 'hace un ruido raro')).toMatchObject({ aplica_probable: true, causa_probable: null });
+    expect(garantiaProbable(vigente, 'frenos', 'chillan los frenos')).toMatchObject({ aplica_probable: false, causa_probable: 'desgaste_normal' });
+    expect(garantiaProbable(vigente, 'suspension', 'desde nuevo')).toMatchObject({ aplica_probable: false });
+    expect(garantiaProbable({ ...vigente, vigente: false }, 'motor', 'desde nuevo')).toMatchObject({ aplica_probable: false });
+  });
+
+  it('el kilometraje que reporta el cliente puede vencer la garantía', () => {
+    expect(conKilometraje(vigente, 98_000)).toMatchObject({ vigente: false, motivo: expect.stringContaining('60.000 km') });
+    expect(conKilometraje(vigente, 30_000)).toBe(vigente);
+    expect(conKilometraje(vigente)).toBe(vigente);
   });
 });

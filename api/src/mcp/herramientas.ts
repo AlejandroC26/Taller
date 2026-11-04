@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { NOMBRE_TALLER } from '../config';
+import { invalido } from '../comun/errores';
 import { validar } from '../comun/http';
 import { consultarCotizacion, pagoDto, registrarPago, registrarRespuestaCliente, respuestaClienteDto } from '../cotizaciones/cotizaciones.service';
 import { buscarRepuestosParaOrden, finalizarDiagnostico, guardarDiagnostico, remitirOrden, verDiagnostico } from '../diagnosticos/diagnosticos.service';
@@ -32,8 +33,18 @@ import {
   verReparacion,
 } from '../reparaciones/reparaciones.service';
 import { listarServicios, registrarServicio, servicioDto } from '../servicios/servicios.service';
-import { ESPECIALIDADES, TIPOS_TALLER } from '../talleres/reglas';
-import { actualizarTaller, disponibilidad, editarTallerDto, listarTalleres, registrarTaller, tallerDto } from '../talleres/talleres.service';
+import { ESPECIALIDADES, sumarDias, TIPOS_TALLER } from '../talleres/reglas';
+import {
+  actualizarTaller,
+  disponibilidad,
+  disponibilidadRango,
+  editarTallerDto,
+  listarTalleres,
+  registrarTaller,
+  reservaDto,
+  reservarFranja,
+  tallerDto,
+} from '../talleres/talleres.service';
 import type { Actor } from '../usuarios/actor';
 import { contratoMarkdown, describirFlujo, flujoMarkdown } from './flujo';
 
@@ -87,26 +98,86 @@ const SEDE = z.looseObject({
   nombre: z.string(),
   ubicacion: z.looseObject({ ciudad: z.string(), direccion: z.string() }),
 });
+const SIGUIENTE_PASO = z.looseObject({ responsable: z.string(), descripcion: z.string() });
+const HORARIO = z.looseObject({
+  dias: z.array(z.number()).describe('1 = lunes … 7 = domingo'),
+  apertura: z.string().describe('HH:MM, hora de Colombia'),
+  cierre: z.string().describe('HH:MM, hora de Colombia'),
+});
+const SEDE_CON_HORARIO = z.looseObject({ ...SEDE.shape, horario: HORARIO });
+const FRANJA = z.looseObject({
+  inicio: z.string().describe('ISO 8601 con zona -05:00; por ejemplo 2026-11-05T09:00:00-05:00'),
+  libres: z.number().describe('Cupos que quedan en esa franja de una hora'),
+});
 // agendar_cita: la orden con su sede y la fecha de la cita en hora de Colombia.
 const SALIDA_CITA = z.looseObject({
   ...SALIDA_ORDEN.shape,
   sede: SEDE,
   fecha_cita: z.string().describe('ISO 8601 con zona -05:00; por ejemplo 2026-11-03T08:00:00-05:00'),
+  por_garantia: z.boolean(),
+  motivo_reclamo: z.string().nullable(),
 });
 const SALIDA_PREDIAGNOSTICO = z.looseObject({
+  id_prediagnostico: z.string().describe('PD-0001: envíelo en agendar_cita para agendar con esta misma decisión'),
   id_relacion: z.string(),
   vehiculo: z.string(),
+  taller: SEDE_CON_HORARIO.nullable().describe('La sede a la que debe ir el vehículo'),
   especialidad: z.string(),
   ruta: z.enum(['especializada', 'revision_general']),
   confianza: z.number(),
   resumen: z.string(),
   fuente: z.enum(['modelo', 'reglas']).describe('modelo: lo decidió el agente de IA; reglas: palabras clave del catálogo'),
+  motivo_decision: z.string().describe('Una o dos frases para el cliente: por qué va a esa sede'),
   servicios_probables: z.array(z.looseObject({ sku: z.string(), nombre: z.string(), precio_mano_obra: z.number() })),
-  garantia: z.looseObject({ vigente: z.boolean(), vence: z.string(), cubre: z.array(z.string()), motivo: z.string().optional() }),
-  sede_sugerida: SEDE.nullable(),
-  siguiente_paso: z.looseObject({ responsable: z.string(), descripcion: z.string() }),
+  garantia: z.looseObject({
+    vigente: z.boolean(),
+    vence: z.string(),
+    cubre: z.array(z.string()),
+    motivo: z.string().optional(),
+    aplica_probable: z.boolean().describe('Estimación: vigente, cubre el sistema y la causa probable no la excluye. La decide el mecánico'),
+    causa_probable: z.enum(CAUSAS).nullable().describe('Estimación por lo que cuenta el cliente; null si no hay pistas'),
+  }),
+  por_garantia: z.boolean(),
+  motivo_reclamo: z.string().nullable(),
+  sede_sugerida: SEDE.nullable().describe('Igual que taller (se conserva por compatibilidad)'),
+  siguiente_paso: SIGUIENTE_PASO,
   acciones_disponibles: z.array(z.string()),
 });
+const SALIDA_DISPONIBILIDAD = z.looseObject({
+  taller: SEDE_CON_HORARIO,
+  cupo_por_franja: z.number(),
+  franjas: z.array(FRANJA),
+});
+const SALIDA_RESERVA = z.looseObject({
+  id_reserva: z.string().describe('RS-0001: envíelo en agendar_cita'),
+  id_relacion: z.string(),
+  taller: SEDE_CON_HORARIO,
+  fecha_hora: z.string().describe('ISO 8601 con zona -05:00'),
+  vence_en: z.string().describe('ISO 8601 con zona -05:00; después la franja se libera'),
+  minutos_vigencia: z.number(),
+  siguiente_paso: SIGUIENTE_PASO,
+  acciones_disponibles: z.array(z.string()),
+});
+
+// Entrada común de prediagnosticar y enrutar_garantia.
+const ENTRADA_PREDIAGNOSTICO = {
+  id_relacion: z.string().describe('Id de la relación cliente–vehículo del concesionario; por ejemplo REL-1001'),
+  mensajes_cliente: z.array(z.string()).optional().describe('Lo que el cliente contó, un mensaje por elemento'),
+  vin: z.string().optional().describe('VIN de 17 caracteres; si se envía, debe ser el del id_relacion'),
+  motivo_reclamo: z.string().optional().describe('Por qué reclama la garantía, en palabras del cliente'),
+  kilometraje: z.number().int().optional().describe('Kilometraje actual que reporta el cliente'),
+  id_mensaje: idMensaje,
+};
+type EntradaPrediagnostico = { id_relacion: string; mensajes_cliente?: string[]; vin?: string; motivo_reclamo?: string; kilometraje?: number };
+const aPrediagnosticarDto = (e: EntradaPrediagnostico, porGarantia: boolean | undefined) =>
+  validar(prediagnosticarDto, {
+    idRelacion: e.id_relacion,
+    mensajesCliente: e.mensajes_cliente,
+    vin: e.vin,
+    porGarantia,
+    motivoReclamo: e.motivo_reclamo,
+    kilometraje: e.kilometraje,
+  });
 const SALIDA_LISTA = z.looseObject({ elementos: z.array(z.looseObject({})), total: z.number() });
 const SALIDA_OBJETO = z.looseObject({});
 
@@ -236,18 +307,36 @@ export function crearServidorMcp(actor: Actor): McpServer {
       {
         title: 'Prediagnóstico (servicio de diagnóstico del taller)',
         description:
-          'El agente de prediagnóstico lee lo que el cliente le contó al concesionario y responde la especialidad, los servicios probables con su precio, la confianza y la ruta: ' +
-          '"especializada" (directo a la sede especialista) o "revision_general" (primero a mantenimiento). Incluye la sede sugerida y la garantía del vehículo. ' +
-          'Responde en menos de 60 s; si no alcanza, devuelve un error para reintentar.',
+          'El agente de prediagnóstico lee lo que el cliente le contó al concesionario y decide a qué sede va el vehículo (taller), con la especialidad, los servicios probables con su precio, la confianza, ' +
+          'la ruta ("especializada": directo a la sede especialista; "revision_general": primero a mantenimiento), motivo_decision para el cliente y la garantía del vehículo. ' +
+          'Devuelve id_prediagnostico: agende con él para no recalcular. Responde en menos de 30 s; si no alcanza, devuelve un error para reintentar.',
+        inputSchema: z.object({ ...ENTRADA_PREDIAGNOSTICO, por_garantia: z.boolean().optional() }),
+        outputSchema: SALIDA_PREDIAGNOSTICO,
+        annotations: ESCRIBE,
+      },
+      (e) => seguro(() => unaVez(e.id_mensaje, 'prediagnosticar', () => consultarPrediagnostico(aPrediagnosticarDto(e, e.por_garantia)))),
+    ),
+  );
+
+  registrar(
+    'enrutar_garantia',
+    servidor.registerTool(
+      'enrutar_garantia',
+      {
+        title: 'Enrutar un reclamo de garantía',
+        description:
+          'Para un cliente que viene por garantía: con el motivo del reclamo decide a qué sede va el vehículo y responde lo mismo que prediagnosticar, con por_garantia en true, ' +
+          'garantia.aplica_probable y garantia.causa_probable. Si no hay una especialidad clara, manda a revisión general y lo explica en motivo_decision. ' +
+          'Agende con el id_prediagnostico que devuelve. Responde en menos de 30 s; si no alcanza, devuelve un error para reintentar.',
         inputSchema: z.object({
-          id_relacion: z.string().describe('Id de la relación cliente–vehículo del concesionario; por ejemplo REL-1001'),
-          mensajes_cliente: z.array(z.string()).min(1).describe('Lo que el cliente contó, un mensaje por elemento'),
+          ...ENTRADA_PREDIAGNOSTICO,
+          motivo_reclamo: z.string().min(1).describe('Por qué reclama la garantía, en palabras del cliente'),
+          por_garantia: z.boolean().optional().describe('Siempre true; se acepta por compatibilidad'),
         }),
         outputSchema: SALIDA_PREDIAGNOSTICO,
-        annotations: LECTURA,
+        annotations: ESCRIBE,
       },
-      ({ id_relacion, mensajes_cliente }) =>
-        seguro(() => consultarPrediagnostico(validar(prediagnosticarDto, { idRelacion: id_relacion, mensajesCliente: mensajes_cliente }))),
+      (e) => seguro(() => unaVez(e.id_mensaje, 'enrutar_garantia', () => consultarPrediagnostico(aPrediagnosticarDto(e, true)))),
     ),
   );
 
@@ -257,12 +346,51 @@ export function crearServidorMcp(actor: Actor): McpServer {
       'consultar_disponibilidad',
       {
         title: 'Disponibilidad de una sede',
-        description: 'Franjas de una hora libres para agendar en una sede y fecha, con los cupos que quedan.',
-        inputSchema: z.object({ taller: sede, fecha: z.string().describe('AAAA-MM-DD') }),
-        outputSchema: SALIDA_OBJETO,
+        description:
+          'Franjas de una hora para agendar en una sede. Con desde y hasta (AAAA-MM-DD, hasta 14 días) devuelve solo las franjas libres del rango; ' +
+          'con fecha, todas las de ese día con los cupos que quedan. Las horas apartadas con reservar_franja cuentan como ocupadas.',
+        inputSchema: z.object({
+          taller: sede,
+          fecha: z.string().optional().describe('AAAA-MM-DD: un solo día'),
+          desde: z.string().optional().describe('AAAA-MM-DD: primer día del rango'),
+          hasta: z.string().optional().describe('AAAA-MM-DD: último día del rango (incluido); si falta, una semana desde "desde"'),
+        }),
+        outputSchema: SALIDA_DISPONIBILIDAD,
         annotations: LECTURA,
       },
-      ({ taller, fecha }) => seguro(() => disponibilidad(taller, fecha)),
+      ({ taller, fecha, desde, hasta }) =>
+        seguro(async () => {
+          if (desde) return disponibilidadRango(taller, desde, hasta ?? sumarDias(desde, 6));
+          if (fecha) return disponibilidad(taller, fecha);
+          throw invalido('Envíe fecha, o desde y hasta');
+        }),
+    ),
+  );
+
+  registrar(
+    'reservar_franja',
+    servidor.registerTool(
+      'reservar_franja',
+      {
+        title: 'Apartar una franja',
+        description:
+          'Aparta por 10 minutos una franja libre para un vehículo mientras el cliente confirma la hora, para que nadie más la tome. ' +
+          'Si el vehículo ya tenía otra hora apartada, esa se libera. Agende con el id_reserva que devuelve.',
+        inputSchema: z.object({
+          taller: sede,
+          fecha_hora: z.string().describe('ISO 8601 con zona, el inicio de una franja libre; por ejemplo 2026-11-05T09:00:00-05:00'),
+          id_relacion: z.string(),
+          id_mensaje: idMensaje,
+        }),
+        outputSchema: SALIDA_RESERVA,
+        annotations: ESCRIBE,
+      },
+      (e) =>
+        seguro(() =>
+          unaVez(e.id_mensaje, 'reservar_franja', () =>
+            reservarFranja(validar(reservaDto, { taller: e.taller, fechaHora: e.fecha_hora, idRelacion: e.id_relacion })),
+          ),
+        ),
     ),
   );
 
@@ -273,11 +401,14 @@ export function crearServidorMcp(actor: Actor): McpServer {
       {
         title: 'Agendar cita',
         description:
-          'Agenda el vehículo en una sede. Envíe los mensajes del cliente: el taller calcula el prediagnóstico y, si no indica sede, usa la sugerida. ' +
-          'Marque por_garantia si el cliente reclama garantía. Crea la orden en estado agendada.',
+          'Agenda el vehículo en una sede y crea la orden en estado agendada. Con id_prediagnostico usa esa decisión (sede, especialidad, mensajes y garantía) sin volver a calcularla; ' +
+          'con id_reserva usa la hora y la sede apartadas. Sin ninguno, envíe fecha_hora y los mensajes del cliente: el taller calcula el prediagnóstico. ' +
+          'Marque por_garantia si el cliente reclama garantía.',
         inputSchema: z.object({
           id_relacion: z.string(),
-          fecha_hora: z.string().describe('ISO 8601 con zona, en una franja libre; por ejemplo 2026-10-27T09:00:00-05:00'),
+          id_prediagnostico: z.string().optional().describe('PD-0001, de prediagnosticar o enrutar_garantia'),
+          id_reserva: z.string().optional().describe('RS-0001, de reservar_franja'),
+          fecha_hora: z.string().optional().describe('ISO 8601 con zona, en una franja libre; por ejemplo 2026-10-27T09:00:00-05:00. Obligatoria sin id_reserva'),
           taller: sede.optional(),
           mensajes_cliente: z.array(z.string()).optional(),
           sintomas: z.string().optional(),
@@ -296,6 +427,8 @@ export function crearServidorMcp(actor: Actor): McpServer {
               actor,
               validar(citaDto, {
                 idRelacion: e.id_relacion,
+                idPrediagnostico: e.id_prediagnostico,
+                idReserva: e.id_reserva,
                 fechaHora: e.fecha_hora,
                 taller: e.taller,
                 mensajesCliente: e.mensajes_cliente,

@@ -11,7 +11,9 @@ export const ENTRANTES = {
   concesionario: [
     'listar_talleres',
     'prediagnosticar',
+    'enrutar_garantia',
     'consultar_disponibilidad',
+    'reservar_franja',
     'agendar_cita',
     'cancelar_cita',
     'estado_orden',

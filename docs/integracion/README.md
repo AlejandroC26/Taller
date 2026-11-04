@@ -65,7 +65,8 @@ stateDiagram-v2
    - `revision_general`: no se sabe qué tiene. Pasa primero por mantenimiento, que luego **remite** a la especializada. La revisión general (`REV-GENERAL`) se cobra junto con la especialidad.
 
    El agente usa el modelo local (`LOCAL_URL`). Si no responde, usa reglas por palabras clave y lo dice en `fuente`.
-2. `agendar_cita` en una franja libre (`consultar_disponibilidad`). La cita puede venir `por_garantia`, con el motivo del reclamo.
+   Si el cliente viene por garantía, el concesionario usa `enrutar_garantia` con el motivo del reclamo. Las dos responden un `id_prediagnostico`.
+2. Consulta las franjas libres de la sede (`consultar_disponibilidad` con `desde` y `hasta`), aparta la que elija el cliente con `reservar_franja` y, cuando confirma, llama `agendar_cita` con `id_prediagnostico` e `id_reserva`: la cita no vuelve a calcular el prediagnóstico. La cita puede venir `por_garantia`, con el motivo del reclamo.
 3. Un mecánico de la sede **toma** la orden. Registra cada servicio (SKU con precio fijo), la **causa** de la falla y su **dictamen de garantía** (aplica o no y por qué), con **evidencias**, y los **repuestos a comprar**: los busca en el catálogo de las tiendas, filtrado por marca, modelo y año del vehículo (`buscar_repuestos_tienda`), y el taller guarda tienda, `repuesto_id`, SKU y cantidad, **sin precio**.
 4. **Toda orden se consulta al concesionario**, venga o no por garantía. El taller envía `validar_garantia` y el concesionario responde con `registrar_resultado_garantia`, por servicio.
 5. El taller envía a facturación `crear_cotizacion`. Lleva la mano de obra con precio, los repuestos sin precio, la garantía de cada línea y el `mensaje_garantia` para el cliente. Facturación busca precios en las tiendas, le escribe al cliente por Telegram y responde con `registrar_respuesta_cliente`, que incluye la orden de compra si el cliente acepta.

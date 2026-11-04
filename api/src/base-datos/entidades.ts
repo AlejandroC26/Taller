@@ -8,11 +8,13 @@ import { EventoIntegracion } from '../integraciones/evento.entity';
 import { MensajeRecibido } from '../integraciones/mensaje-recibido.entity';
 import { Asignacion } from '../ordenes/asignacion.entity';
 import { Orden } from '../ordenes/orden.entity';
+import { PrediagnosticoGuardado } from '../prediagnostico/prediagnostico.entity';
 import { RelacionVehiculo } from '../relaciones/relacion.entity';
 import { ParteUsada } from '../reparaciones/parte-usada.entity';
 import { RegistroHoras } from '../reparaciones/registro-horas.entity';
 import { Reparacion } from '../reparaciones/reparacion.entity';
 import { Servicio } from '../servicios/servicio.entity';
+import { ReservaFranja } from '../talleres/reserva.entity';
 import { Taller } from '../talleres/taller.entity';
 import { Rol } from '../usuarios/rol.entity';
 import { Usuario } from '../usuarios/usuario.entity';
@@ -37,4 +39,6 @@ export const ENTIDADES = [
   ParteUsada,
   EventoIntegracion,
   MensajeRecibido,
+  PrediagnosticoGuardado,
+  ReservaFranja,
 ];

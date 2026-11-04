@@ -12,9 +12,11 @@ Todas están en `POST /mcp` con un token de rol `agente`. Las que cambian algo a
 | Herramienta | Entrada | Para qué |
 |---|---|---|
 | `listar_talleres` | `especialidad?`, `ciudad?` | Sedes con tipo, especialidades, ubicación y horario. |
-| `prediagnosticar` | `id_relacion`, `mensajes_cliente[]` | Especialidad, servicios probables con precio, confianza, ruta y sede sugerida. |
-| `consultar_disponibilidad` | `taller` (id o código), `fecha` (AAAA-MM-DD) | Franjas de una hora con los cupos libres. |
-| `agendar_cita` | `id_relacion`, `fecha_hora`, `taller?`, `mensajes_cliente[]?`, `sintomas?`, `kilometraje?`, `por_garantia?`, `motivo_reclamo?`, `id_mensaje?` | Crea la orden `agendada`. Sin prediagnóstico lo calcula y, sin sede, usa la sugerida. |
+| `enrutar_garantia` | `id_relacion`, `motivo_reclamo`, `mensajes_cliente[]?`, `vin?`, `kilometraje?`, `id_mensaje?` | Para un reclamo de garantía: a qué sede va (`taller`), `motivo_decision`, garantía probable e `id_prediagnostico`. |
+| `prediagnosticar` | `id_relacion`, `mensajes_cliente[]` o `motivo_reclamo`, `vin?`, `por_garantia?`, `kilometraje?`, `id_mensaje?` | Lo mismo para cualquier cliente: especialidad, servicios probables con precio, confianza, ruta y sede. |
+| `consultar_disponibilidad` | `taller` (id o código) y `desde` + `hasta?` (AAAA-MM-DD, hasta 14 días) o `fecha` | Con rango, solo las franjas libres; con `fecha`, todas las del día con sus cupos. |
+| `reservar_franja` | `taller`, `fecha_hora`, `id_relacion`, `id_mensaje?` | Aparta la franja 10 minutos mientras el cliente confirma. Devuelve `id_reserva`. |
+| `agendar_cita` | `id_relacion`, `id_prediagnostico?`, `id_reserva?`, `fecha_hora?` (obligatoria sin `id_reserva`), `taller?`, `mensajes_cliente[]?`, `sintomas?`, `kilometraje?`, `por_garantia?`, `motivo_reclamo?`, `id_mensaje?` | Crea la orden `agendada`. Con `id_prediagnostico` usa esa decisión sin recalcular; con `id_reserva`, la hora y la sede apartadas. |
 | `cancelar_cita` | `codigo`, `motivo`, `id_mensaje?` | Cancela mientras no haya empezado la reparación. |
 | `estado_orden` | `codigo` | La orden completa con `siguiente_paso` y `acciones_disponibles`. |
 | `listar_ordenes` | `estado?`, `taller?`, `id_relacion?`, `abiertas?` | Órdenes filtradas. |
@@ -26,65 +28,148 @@ Todas están en `POST /mcp` con un token de rol `agente`. Las que cambian algo a
 Las evidencias se descargan con `GET /api/evidencias/:id`, usando el token **web** del
 mismo usuario agente, no el de MCP.
 
-### Ejemplo: prediagnosticar
+### Flujo de garantía, bot a bot
+
+1. `enrutar_garantia` con el motivo del reclamo → `id_prediagnostico` y `taller`.
+2. `consultar_disponibilidad { taller, desde, hasta }` → franjas libres para ofrecerle al cliente.
+3. `reservar_franja` con la hora que elija → `id_reserva` (10 minutos).
+4. Cuando el cliente dice «sí»: `agendar_cita { id_relacion, id_prediagnostico, id_reserva, id_mensaje }`.
+5. El taller envía `notificar_estado_vehiculo` en cada cambio y `validar_garantia` al finalizar el diagnóstico.
+
+### Ejemplo: enrutar_garantia
 
 ```json
-{ "id_relacion": "REL-1001", "mensajes_cliente": ["Desde la semana pasada el carro chilla al frenar"] }
+{
+  "id_relacion": "REL-1005",
+  "vin": "9FBHJD204LM500005",
+  "por_garantia": true,
+  "motivo_reclamo": "Los frenos chillan mucho desde hace una semana",
+  "mensajes_cliente": ["Vengo a cobrar la garantía porque los frenos chillan mucho"],
+  "kilometraje": 98000,
+  "id_mensaje": "conc-<uuid>-enrutar"
+}
 ```
 
 ```json
 {
-  "id_relacion": "REL-1001",
-  "vehiculo": "Renault Duster Intens 1.3 Turbo 2023 (SUV, 5 puertas)",
-  "garantia": { "vigente": true, "vence": "2028-03-14", "kmMaximo": 60000, "cubre": ["frenos", "suspension", "motor", "electrico", "transmision"] },
-  "especialidad": "frenos",
-  "servicios": ["FRE-PASTILLAS"],
-  "confianza": 1,
-  "resumen": "Por lo que cuenta el cliente («Desde la semana pasada el carro chilla al frenar»), apunta a frenos.",
-  "fuente": "reglas",
-  "ruta": "especializada",
-  "servicios_probables": [{ "sku": "FRE-PASTILLAS", "nombre": "Cambio de pastillas de freno", "precio_mano_obra": 80000 }],
-  "sede_sugerida": {
+  "id_prediagnostico": "PD-0012",
+  "id_relacion": "REL-1005",
+  "vehiculo": "Renault Duster Intens 1.3 Turbo 2020 (SUV, 5 puertas)",
+  "taller": {
     "id": 2,
     "codigo": "PL-FRENOS",
     "nombre": "Pulgas Locas Frenos y Suspensión",
     "tipo": "especializado",
-    "ubicacion": { "ciudad": "Bogotá", "direccion": "Avenida Boyacá # 64-20, Normandía", "latitud": 4.667, "longitud": -74.111 }
+    "ubicacion": { "ciudad": "Bogotá", "direccion": "Avenida Boyacá # 64-20, Normandía", "latitud": 4.667, "longitud": -74.111 },
+    "horario": { "dias": [1, 2, 3, 4, 5], "apertura": "07:00", "cierre": "16:00" }
   },
-  "siguiente_paso": { "responsable": "concesionario", "descripcion": "Agende la cita en la sede especializada sugerida (consultar_disponibilidad → agendar_cita)" },
-  "acciones_disponibles": ["consultar_disponibilidad", "agendar_cita"]
+  "especialidad": "frenos",
+  "servicios": ["FRE-DISCOS", "FRE-LIQUIDO"],
+  "confianza": 0.9,
+  "resumen": "Frenos: rectificación o cambio de discos y purga y cambio de líquido de frenos",
+  "fuente": "modelo",
+  "ruta": "especializada",
+  "motivo_decision": "Lo que cuenta el cliente apunta a frenos (rectificación o cambio de discos, purga y cambio de líquido de frenos). Por eso va directo a Pulgas Locas Frenos y Suspensión, la sede especialista.",
+  "garantia": {
+    "vigente": false,
+    "vence": "2023-02-17",
+    "kmMaximo": 60000,
+    "cubre": ["frenos", "suspension", "motor", "electrico", "transmision"],
+    "motivo": "La garantía venció el 2023-02-17",
+    "aplica_probable": false,
+    "causa_probable": "desgaste_normal"
+  },
+  "por_garantia": true,
+  "motivo_reclamo": "Los frenos chillan mucho desde hace una semana",
+  "servicios_probables": [
+    { "sku": "FRE-DISCOS", "nombre": "Rectificación o cambio de discos", "precio_mano_obra": 140000 },
+    { "sku": "FRE-LIQUIDO", "nombre": "Purga y cambio de líquido de frenos", "precio_mano_obra": 60000 }
+  ],
+  "sede_sugerida": { "…": "igual que taller" },
+  "siguiente_paso": { "responsable": "concesionario", "descripcion": "Consultar disponibilidad en PL-FRENOS (consultar_disponibilidad con desde y hasta), apartar la hora con reservar_franja y agendar con agendar_cita enviando id_prediagnostico" },
+  "acciones_disponibles": ["consultar_disponibilidad", "reservar_franja", "agendar_cita"]
 }
 ```
 
-`fuente` dice de dónde salió la respuesta:
-- `modelo`: el agente de IA (`LOCAL_URL`).
-- `reglas`: las palabras clave del catálogo. Se usan si el modelo no responde o su confianza es menor a 0,6.
+`prediagnosticar` responde igual; ahí `motivo_reclamo` es opcional y `por_garantia` vale `false`
+si no se envía.
 
-**Tiempo de respuesta.** El modelo tiene `LOCAL_TIEMPO_MS` (8 s por defecto) para responder; si
-no alcanza, siguen las reglas. La herramienta completa responde en menos de 45 s: si algo no
+- **`fuente`**: `modelo` si lo decidió el agente de IA (`LOCAL_URL`); `reglas` si se usaron las palabras clave del catálogo, porque el modelo no respondió o su confianza fue menor a 0,6.
+- **`garantia.aplica_probable` y `causa_probable`** son una estimación por lo que cuenta el cliente (por ejemplo, «chillan» apunta a desgaste normal). Quien decide es el mecánico, con evidencias, y quien valida es el concesionario.
+- **`kilometraje`**: si supera los 60.000 km, la garantía sale como no vigente aunque la fecha no haya vencido.
+- **`vin`**: si no es el del `id_relacion`, responde «El VIN … no corresponde al id_relacion …».
+- **Revisión general**: con un mensaje ambiguo («hace un ruido raro, no sé qué es»), la ruta es `revision_general`, `taller` es la sede de mantenimiento y `motivo_decision` lo explica.
+
+**Tiempo de respuesta.** El modelo tiene `LOCAL_TIEMPO_MS` (8 s por defecto, 22 s como máximo); si
+no alcanza, siguen las reglas. La herramienta completa responde en menos de 30 s: si algo no
 alcanza, devuelve `isError: true` con «No se pudo calcular el prediagnóstico a tiempo, intente de
-nuevo», nunca un corte. El `outputSchema` publica todos los campos de arriba.
+nuevo», nunca un corte. Con el mismo `id_mensaje`, un reintento devuelve el mismo
+`id_prediagnostico` sin volver a llamar al modelo.
 
-Con un mensaje ambiguo («hace un ruido raro, no sé qué es»), la ruta es
-`revision_general` y la sede sugerida es la de mantenimiento.
+### Ejemplo: consultar_disponibilidad por rango
 
-### Ejemplo: agendar_cita
+```json
+{ "taller": "PL-FRENOS", "desde": "2026-11-05", "hasta": "2026-11-12" }
+```
 
 ```json
 {
-  "id_relacion": "REL-1001",
-  "taller": "PL-FRENOS",
-  "fecha_hora": "2026-10-28T09:00:00-05:00",
-  "mensajes_cliente": ["Desde la semana pasada el carro chilla al frenar", "Las pastillas se gastaron muy rápido"],
-  "por_garantia": true,
-  "motivo_reclamo": "Desgaste prematuro de pastillas con 18.000 km",
-  "id_mensaje": "conc-7f3c2a10-agendar"
+  "taller": { "codigo": "PL-FRENOS", "nombre": "Pulgas Locas Frenos y Suspensión", "horario": { "dias": [1, 2, 3, 4, 5], "apertura": "07:00", "cierre": "16:00" } },
+  "desde": "2026-11-05",
+  "hasta": "2026-11-12",
+  "cupo_por_franja": 1,
+  "franjas": [
+    { "inicio": "2026-11-05T14:00:00-05:00", "libres": 1 },
+    { "inicio": "2026-11-05T15:00:00-05:00", "libres": 1 }
+  ],
+  "total": 47,
+  "siguiente_paso": { "responsable": "concesionario", "descripcion": "Ofrézcale las horas al cliente; aparte la que elija con reservar_franja mientras confirma" },
+  "acciones_disponibles": ["reservar_franja", "agendar_cita"]
 }
 ```
 
+Sin `hasta`, el rango es de una semana. Más de 14 días responde «Consulte como máximo 14 días por
+vez». Las citas y las horas apartadas por otros vehículos no aparecen. Con `fecha` (un solo día)
+sigue funcionando como antes: todas las franjas, también las llenas (`libres: 0`).
+
+### Ejemplo: reservar_franja
+
+```json
+{ "taller": "PL-FRENOS", "fecha_hora": "2026-11-05T14:00:00-05:00", "id_relacion": "REL-1005", "id_mensaje": "conc-<uuid>-reservar" }
+```
+
+```json
+{
+  "id_reserva": "RS-0012",
+  "id_relacion": "REL-1005",
+  "taller": { "codigo": "PL-FRENOS", "nombre": "Pulgas Locas Frenos y Suspensión", "…": "…" },
+  "fecha_hora": "2026-11-05T14:00:00-05:00",
+  "vence_en": "2026-11-04T01:52:36-05:00",
+  "minutos_vigencia": 10,
+  "siguiente_paso": { "responsable": "concesionario", "descripcion": "Confirme la hora con el cliente y agende con agendar_cita enviando id_reserva (y id_prediagnostico) antes de 10 minutos" },
+  "acciones_disponibles": ["agendar_cita", "reservar_franja"]
+}
+```
+
+- Mientras está vigente, la franja ocupa cupo: para otro vehículo responde «Esa franja ya está llena».
+- Un vehículo tiene una sola reserva vigente: apartar otra hora libera la anterior.
+- Si vence, ya no aparta nada, pero `agendar_cita` con ese `id_reserva` funciona si la franja sigue libre.
+
+### Ejemplo: agendar_cita
+
+Con lo ya decidido (el caso del concesionario):
+
+```json
+{ "id_relacion": "REL-1005", "id_prediagnostico": "PD-0012", "id_reserva": "RS-0012", "id_mensaje": "conc-<uuid>-agendar" }
+```
+
+- La sede sale de `taller`, si se envía; si no, de la reserva, y si no, del prediagnóstico. La hora sale de la reserva, o de `fecha_hora`.
+- Con `id_prediagnostico` **no se recalcula** el prediagnóstico: la orden guarda el mismo, con sus mensajes, `por_garantia`, `motivo_reclamo` y kilometraje, salvo que se envíen otros.
+- Sin `id_prediagnostico` sigue funcionando como antes: con `fecha_hora` y `mensajes_cliente`, el taller lo calcula.
+
 La respuesta es la orden, igual que en `estado_orden`. Su `outputSchema` garantiza `codigo`,
-`estado`, `siguiente_paso`, `acciones_disponibles`, `sede { id, codigo, nombre, ubicacion }` y
-`fecha_cita` (ISO 8601 con zona `-05:00`). Se ve así, recortada:
+`estado`, `siguiente_paso`, `acciones_disponibles`, `sede { id, codigo, nombre, ubicacion }`,
+`fecha_cita` (ISO 8601 con zona `-05:00`), `por_garantia` y `motivo_reclamo`. Se ve así, recortada:
 
 ```json
 {
@@ -117,6 +202,10 @@ consulte `listar_ordenes { id_relacion, abiertas: true }` y use esa orden.
 | Franja llena | «Esa franja ya está llena: elija otra con consultar_disponibilidad» |
 | Hora que no es una franja | «Esa hora no es una franja de la sede: consulte consultar_disponibilidad» |
 | Sede que no existe | «No existe la sede PL-NOEXISTE» |
+| Sin hora | «Envíe fecha_hora o id_reserva» |
+| Prediagnóstico de otro vehículo | «El prediagnóstico PD-0012 es de otro id_relacion» |
+| Reserva ya usada o reemplazada | «La reserva RS-0012 ya no está vigente: aparte la hora de nuevo con reservar_franja» |
+| Reserva en otra sede u hora | «La reserva RS-0012 es en …, no en …» / «La reserva RS-0012 es para …, no para …» |
 | `id_relacion` desconocido | «El concesionario no reconoce el id_relacion REL-9999. El cliente debe obtenerlo en el concesionario con su cédula y el VIN» |
 
 ### Ejemplo: registrar_resultado_garantia

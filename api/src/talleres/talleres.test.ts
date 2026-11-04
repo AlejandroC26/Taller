@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diaSemana, exigirFranjaLibre, fechaLocal, franjas, isoColombia } from './reglas';
+import { codigoReserva, diaSemana, diasDelRango, exigirFranjaLibre, fechaLocal, franjas, isoColombia, numeroReserva, sumarDias } from './reglas';
 
 const horario = { dias: [1, 2, 3, 4, 5, 6], apertura: '08:00', cierre: '12:00' };
 const antes = new Date('2026-01-01T00:00:00Z');
@@ -52,5 +52,28 @@ describe('agenda de una sede', () => {
     expect(() => exigirFranjaLibre(lista, '2026-10-27T09:00:00-05:00')).not.toThrow();
     expect(() => exigirFranjaLibre(lista, '2026-10-27T08:00:00-05:00')).toThrow(/llena/);
     expect(() => exigirFranjaLibre(lista, '2026-10-27T08:30:00-05:00')).toThrow(/no es una franja/);
+  });
+});
+
+describe('rangos y reservas', () => {
+  it('un rango da los días de desde a hasta, incluidos, hasta 14', () => {
+    expect(diasDelRango('2026-11-05', '2026-11-07')).toEqual(['2026-11-05', '2026-11-06', '2026-11-07']);
+    expect(diasDelRango('2026-11-30', '2026-12-01')).toEqual(['2026-11-30', '2026-12-01']);
+    expect(diasDelRango('2026-11-05', '2026-11-18')).toHaveLength(14);
+    expect(() => diasDelRango('2026-11-05', '2026-11-19')).toThrow(/14 días/);
+    expect(() => diasDelRango('2026-11-07', '2026-11-05')).toThrow(/anterior/);
+    expect(() => diasDelRango('5/11/2026', '2026-11-05')).toThrow(/AAAA-MM-DD/);
+  });
+
+  it('sumarDias cruza meses', () => {
+    expect(sumarDias('2026-11-05', 6)).toBe('2026-11-11');
+    expect(sumarDias('2026-12-28', 6)).toBe('2027-01-03');
+  });
+
+  it('códigos RS-0001', () => {
+    expect(codigoReserva(7)).toBe('RS-0007');
+    expect(numeroReserva('RS-0007')).toBe(7);
+    expect(numeroReserva('rs7')).toBe(7);
+    expect(numeroReserva('OT-0007')).toBeNull();
   });
 });

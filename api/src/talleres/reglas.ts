@@ -85,3 +85,35 @@ export function exigirFranjaLibre(disponibles: Franja[], fechaHora: string) {
   if (!franja) throw invalido('Esa hora no es una franja de la sede: consulte consultar_disponibilidad');
   if (franja.libres === 0) throw invalido('Esa franja ya está llena: elija otra con consultar_disponibilidad');
 }
+
+// ---------- Rangos y reservas ----------
+
+export const MAXIMO_DIAS_RANGO = 14;
+
+// Las fechas AAAA-MM-DD de un rango, de desde a hasta (incluidos).
+export function diasDelRango(desde: string, hasta: string, maximo = MAXIMO_DIAS_RANGO): string[] {
+  exigirFecha(desde);
+  exigirFecha(hasta);
+  const inicio = new Date(`${desde}T12:00:00${ZONA}`).getTime();
+  const fin = new Date(`${hasta}T12:00:00${ZONA}`).getTime();
+  if (fin < inicio) throw invalido('La fecha hasta no puede ser anterior a desde');
+  const dias = Math.round((fin - inicio) / 86_400_000) + 1;
+  if (dias > maximo) throw invalido(`Consulte como máximo ${maximo} días por vez`);
+  return Array.from({ length: dias }, (_, i) => new Date(inicio + i * 86_400_000 - 5 * 3_600_000).toISOString().slice(0, 10));
+}
+
+// Cuánto se aparta una franja mientras el cliente confirma.
+export const MINUTOS_RESERVA = 10;
+
+export const codigoReserva = (id: number) => 'RS-' + String(id).padStart(4, '0');
+
+export function numeroReserva(codigo: string): number | null {
+  const numero = Number(/^(?:RS-?)?(\d{1,9})$/i.exec(String(codigo).trim())?.[1]);
+  return numero > 0 ? numero : null;
+}
+
+// AAAA-MM-DD n días después.
+export function sumarDias(fecha: string, dias: number): string {
+  exigirFecha(fecha);
+  return new Date(new Date(`${fecha}T12:00:00${ZONA}`).getTime() + dias * 86_400_000 - 5 * 3_600_000).toISOString().slice(0, 10);
+}

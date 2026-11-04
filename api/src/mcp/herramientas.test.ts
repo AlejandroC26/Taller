@@ -8,6 +8,7 @@ import * as garantias from '../garantias/garantias.service';
 import * as idempotencia from '../integraciones/idempotencia';
 import * as ordenes from '../ordenes/ordenes.service';
 import { PASOS } from '../ordenes/reglas';
+import * as talleres from '../talleres/talleres.service';
 import { crearServidorMcp, HERRAMIENTAS_MECANICO } from './herramientas';
 
 const SEDE = { id: 2, codigo: 'PL-FRENOS', nombre: 'Pulgas Locas Frenos y Suspensión', ubicacion: { ciudad: 'Bogotá', direccion: 'Calle 1' } };
@@ -16,17 +17,22 @@ const orden = { codigo: 'OT-0001', estado: 'agendada', siguiente_paso: { respons
 vi.mock('../ordenes/ordenes.service', async (original) => ({
   ...(await original<typeof import('../ordenes/ordenes.service')>()),
   unaOrden: vi.fn(async () => orden),
-  agendarCita: vi.fn(async () => ({ ...orden, sede: SEDE, fecha_cita: '2026-11-03T08:00:00-05:00' })),
+  agendarCita: vi.fn(async () => ({ ...orden, sede: SEDE, fecha_cita: '2026-11-03T08:00:00-05:00', por_garantia: false, motivo_reclamo: null })),
   consultarPrediagnostico: vi.fn(async () => ({
+    id_prediagnostico: 'PD-0001',
     id_relacion: 'REL-1001',
     vehiculo: 'Renault Duster 2023',
+    taller: { ...SEDE, horario: { dias: [1, 2, 3, 4, 5, 6], apertura: '08:00', cierre: '17:00' } },
     especialidad: 'frenos',
     ruta: 'especializada',
     confianza: 0.8,
     resumen: 'Pastillas gastadas',
     fuente: 'reglas',
+    motivo_decision: 'Lo que cuenta el cliente apunta a frenos. Por eso va directo a Pulgas Locas Frenos y Suspensión, la sede especialista.',
     servicios_probables: [{ sku: 'FRE-PASTILLAS', nombre: 'Cambio de pastillas de freno', precio_mano_obra: 80000 }],
-    garantia: { vigente: true, vence: '2028-03-14', kmMaximo: 60000, cubre: ['frenos'] },
+    garantia: { vigente: true, vence: '2028-03-14', kmMaximo: 60000, cubre: ['frenos'], aplica_probable: false, causa_probable: 'desgaste_normal' },
+    por_garantia: false,
+    motivo_reclamo: null,
     sede_sugerida: SEDE,
     siguiente_paso: { responsable: 'concesionario', descripcion: 'Agende la cita' },
     acciones_disponibles: ['consultar_disponibilidad', 'agendar_cita'],
@@ -50,9 +56,31 @@ vi.mock('../garantias/garantias.service', async (original) => ({
   ...(await original<typeof import('../garantias/garantias.service')>()),
   registrarResultadoGarantia: vi.fn(async () => ({ ...orden, estado: 'en_cotizacion' })),
 }));
+const SEDE_HORARIO = { ...SEDE, horario: { dias: [1, 2, 3, 4, 5, 6], apertura: '08:00', cierre: '17:00' } };
 vi.mock('../talleres/talleres.service', async (original) => ({
   ...(await original<typeof import('../talleres/talleres.service')>()),
   listarTalleres: vi.fn(async () => [{ id: 1, codigo: 'PL-CENTRO' }]),
+  disponibilidad: vi.fn(async () => ({ taller: SEDE_HORARIO, fecha: '2026-11-05', cupo_por_franja: 1, franjas: [{ inicio: '2026-11-05T08:00:00-05:00', libres: 0 }] })),
+  disponibilidadRango: vi.fn(async () => ({
+    taller: SEDE_HORARIO,
+    desde: '2026-11-05',
+    hasta: '2026-11-12',
+    cupo_por_franja: 1,
+    franjas: [{ inicio: '2026-11-05T09:00:00-05:00', libres: 1 }],
+    total: 1,
+    siguiente_paso: { responsable: 'concesionario', descripcion: 'x' },
+    acciones_disponibles: ['reservar_franja', 'agendar_cita'],
+  })),
+  reservarFranja: vi.fn(async () => ({
+    id_reserva: 'RS-0001',
+    id_relacion: 'REL-1005',
+    taller: SEDE_HORARIO,
+    fecha_hora: '2026-11-05T09:00:00-05:00',
+    vence_en: '2026-11-04T10:10:00-05:00',
+    minutos_vigencia: 10,
+    siguiente_paso: { responsable: 'concesionario', descripcion: 'x' },
+    acciones_disponibles: ['agendar_cita'],
+  })),
 }));
 vi.mock('../servicios/servicios.service', async (original) => ({
   ...(await original<typeof import('../servicios/servicios.service')>()),
@@ -159,6 +187,95 @@ describe('MCP para agentes y orquestadores', () => {
     const cita = await cliente.callTool({ name: 'agendar_cita', arguments: { id_relacion: 'REL-1001', fecha_hora: '2026-11-03T08:00:00-05:00' } });
     expect(cita.isError).toBeFalsy();
     expect(cita.structuredContent).toMatchObject({ sede: { codigo: 'PL-FRENOS' }, fecha_cita: '2026-11-03T08:00:00-05:00' });
+  });
+
+  it('enrutar_garantia decide la sede del reclamo, con id_prediagnostico y motivo_decision', async () => {
+    const cliente = await conectar('agente');
+    const { tools } = await cliente.listTools();
+    const esquema = tools.find((t) => t.name === 'enrutar_garantia')!;
+    expect(esquema.inputSchema.required).toEqual(expect.arrayContaining(['id_relacion', 'motivo_reclamo']));
+    expect(esquema.outputSchema?.required).toEqual(expect.arrayContaining(['id_prediagnostico', 'taller', 'motivo_decision', 'garantia', 'siguiente_paso']));
+
+    const r = await cliente.callTool({
+      name: 'enrutar_garantia',
+      arguments: {
+        id_relacion: 'REL-1005',
+        vin: '9FBHJD204LM500005',
+        por_garantia: true,
+        motivo_reclamo: 'Los frenos chillan mucho desde hace una semana',
+        mensajes_cliente: ['Vengo a cobrar la garantía porque los frenos chillan mucho'],
+        kilometraje: 98000,
+        id_mensaje: 'conc-1-enrutar',
+      },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(r.structuredContent).toMatchObject({ id_prediagnostico: 'PD-0001', taller: { codigo: 'PL-FRENOS' } });
+    expect(ordenes.consultarPrediagnostico).toHaveBeenCalledWith({
+      idRelacion: 'REL-1005',
+      vin: '9FBHJD204LM500005',
+      porGarantia: true,
+      motivoReclamo: 'Los frenos chillan mucho desde hace una semana',
+      mensajesCliente: ['Vengo a cobrar la garantía porque los frenos chillan mucho'],
+      kilometraje: 98000,
+    });
+    // Un reintento con el mismo id_mensaje no vuelve a llamar al modelo.
+    await cliente.callTool({ name: 'enrutar_garantia', arguments: { id_relacion: 'REL-1005', motivo_reclamo: 'x', id_mensaje: 'conc-1-enrutar' } });
+    expect(ordenes.consultarPrediagnostico).toHaveBeenCalledTimes(1);
+  });
+
+  it('enrutar_garantia sin motivo_reclamo es un error de entrada', async () => {
+    const r = await (await conectar('agente')).callTool({ name: 'enrutar_garantia', arguments: { id_relacion: 'REL-1005' } });
+    expect(r.isError).toBe(true);
+    expect(ordenes.consultarPrediagnostico).not.toHaveBeenCalled();
+  });
+
+  it('consultar_disponibilidad con desde y hasta usa el rango; con fecha, un día; sin ninguna, error', async () => {
+    const cliente = await conectar('agente');
+    const rango = await cliente.callTool({ name: 'consultar_disponibilidad', arguments: { taller: 'PL-FRENOS', desde: '2026-11-05', hasta: '2026-11-12' } });
+    expect(rango.isError).toBeFalsy();
+    expect(rango.structuredContent).toMatchObject({ franjas: [{ inicio: '2026-11-05T09:00:00-05:00', libres: 1 }] });
+    expect(talleres.disponibilidadRango).toHaveBeenCalledWith('PL-FRENOS', '2026-11-05', '2026-11-12');
+
+    await cliente.callTool({ name: 'consultar_disponibilidad', arguments: { taller: 'PL-FRENOS', desde: '2026-11-05' } });
+    expect(talleres.disponibilidadRango).toHaveBeenLastCalledWith('PL-FRENOS', '2026-11-05', '2026-11-11');
+
+    const dia = await cliente.callTool({ name: 'consultar_disponibilidad', arguments: { taller: 'PL-FRENOS', fecha: '2026-11-05' } });
+    expect(dia.isError).toBeFalsy();
+    expect(talleres.disponibilidad).toHaveBeenCalledWith('PL-FRENOS', '2026-11-05');
+
+    const sinFecha = await cliente.callTool({ name: 'consultar_disponibilidad', arguments: { taller: 'PL-FRENOS' } });
+    expect(sinFecha.isError).toBe(true);
+    expect(texto(sinFecha)).toContain('desde y hasta');
+  });
+
+  it('reservar_franja aparta la hora y es idempotente por id_mensaje', async () => {
+    const cliente = await conectar('agente');
+    const args = { taller: 'PL-FRENOS', fecha_hora: '2026-11-05T09:00:00-05:00', id_relacion: 'REL-1005', id_mensaje: 'conc-1-reservar' };
+    const r = await cliente.callTool({ name: 'reservar_franja', arguments: args });
+    expect(r.isError).toBeFalsy();
+    expect(r.structuredContent).toMatchObject({ id_reserva: 'RS-0001', minutos_vigencia: 10 });
+    expect(talleres.reservarFranja).toHaveBeenCalledWith({ taller: 'PL-FRENOS', fechaHora: '2026-11-05T09:00:00-05:00', idRelacion: 'REL-1005' });
+    await cliente.callTool({ name: 'reservar_franja', arguments: args });
+    expect(talleres.reservarFranja).toHaveBeenCalledTimes(1);
+  });
+
+  it('agendar_cita acepta id_prediagnostico e id_reserva sin fecha_hora', async () => {
+    const r = await (await conectar('agente')).callTool({
+      name: 'agendar_cita',
+      arguments: { id_relacion: 'REL-1005', id_prediagnostico: 'PD-0001', id_reserva: 'RS-0001', id_mensaje: 'conc-1-agendar' },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(ordenes.agendarCita).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ idRelacion: 'REL-1005', idPrediagnostico: 'PD-0001', idReserva: 'RS-0001', fechaHora: undefined }),
+    );
+  });
+
+  it('agendar_cita sin fecha_hora ni id_reserva es un error de entrada', async () => {
+    const r = await (await conectar('agente')).callTool({ name: 'agendar_cita', arguments: { id_relacion: 'REL-1005', id_prediagnostico: 'PD-0001' } });
+    expect(r.isError).toBe(true);
+    expect(texto(r)).toContain('fecha_hora o id_reserva');
+    expect(ordenes.agendarCita).not.toHaveBeenCalled();
   });
 
   it('un prediagnóstico que no alcanza vuelve como isError con el mensaje en español', async () => {

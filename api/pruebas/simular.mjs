@@ -136,29 +136,55 @@ async function correrCaso(nombre) {
   console.log(`\n${negrita(`■ ${nombre}`)} ${gris(c.descripcion)}`);
   const id = () => `${nombre}-${randomUUID()}`;
 
-  // 1. El concesionario pide el prediagnóstico con lo que contó el cliente.
-  const pre = await llamar('agente-concesionario', 'prediagnosticar', { id_relacion: c.idRelacion, mensajes_cliente: c.mensajes });
-  console.log(gris(`    prediagnóstico (${pre.fuente}): ${pre.especialidad}, confianza ${pre.confianza}, ruta ${pre.ruta} → ${pre.sede_sugerida?.nombre}`));
-  let sede = pre.sede_sugerida?.codigo;
+  // 1. El concesionario pide a qué sede va: por garantía con el motivo del reclamo
+  //    (enrutar_garantia); si no, con lo que contó el cliente (prediagnosticar).
+  const pre = c.porGarantia
+    ? await llamar('agente-concesionario', 'enrutar_garantia', {
+        id_relacion: c.idRelacion,
+        motivo_reclamo: c.motivoReclamo,
+        mensajes_cliente: c.mensajes,
+        id_mensaje: id(),
+      })
+    : await llamar('agente-concesionario', 'prediagnosticar', { id_relacion: c.idRelacion, mensajes_cliente: c.mensajes, id_mensaje: id() });
+  console.log(gris(`    ${pre.id_prediagnostico} (${pre.fuente}): ${pre.especialidad}, confianza ${pre.confianza}, ruta ${pre.ruta} → ${pre.taller?.nombre}`));
+  console.log(gris(`    «${pre.motivo_decision}»`));
+  revisar(/^PD-\d{4,}$/.test(pre.id_prediagnostico) && pre.motivo_decision.length > 20 && pre.taller?.horario, 'el prediagnóstico trae id_prediagnostico, motivo_decision y la sede con horario');
+  revisar(pre.por_garantia === (c.porGarantia ?? false), `por_garantia: ${c.porGarantia ?? false}`);
+  let sede = pre.taller?.codigo;
   if (c.esperado.sede) {
     revisar(pre.ruta === c.esperado.ruta && sede === c.esperado.sede, `prediagnóstico: ruta ${c.esperado.ruta} a ${c.esperado.sede}`, { ruta: pre.ruta, sede });
     if (sede !== c.esperado.sede) sede = c.esperado.sede;
   }
 
-  // 2. Agenda la cita en la primera franja libre de esa sede.
+  // 2. Consulta la semana de esa sede, aparta la primera franja libre mientras el cliente
+  //    confirma y agenda con lo ya decidido: sin fecha ni mensajes, no se recalcula nada.
   await despejarRelacion(c.idRelacion);
-  const fechaHora = await primeraFranja(sede);
+  const desde = new Date(Date.now() - 5 * 3600_000 + 86_400_000).toISOString().slice(0, 10);
+  const agenda = await llamar('agente-concesionario', 'consultar_disponibilidad', { taller: sede, desde }, { mostrar: false });
+  revisar(agenda.franjas.length > 0 && agenda.franjas.every((f) => f.libres > 0 && f.inicio.endsWith('-05:00')), 'la disponibilidad por rango trae solo franjas libres en hora de Colombia');
+  const reserva = await llamar('agente-concesionario', 'reservar_franja', {
+    taller: sede,
+    fecha_hora: agenda.franjas[0].inicio,
+    id_relacion: c.idRelacion,
+    id_mensaje: id(),
+  });
+  console.log(gris(`    ${reserva.id_reserva}: ${reserva.fecha_hora}, vence ${reserva.vence_en}`));
   let orden = await llamar('agente-concesionario', 'agendar_cita', {
     id_relacion: c.idRelacion,
-    fecha_hora: fechaHora,
+    id_prediagnostico: pre.id_prediagnostico,
+    id_reserva: reserva.id_reserva,
     taller: sede,
-    mensajes_cliente: c.mensajes,
-    por_garantia: c.porGarantia ?? false,
-    ...(c.motivoReclamo ? { motivo_reclamo: c.motivoReclamo } : {}),
     id_mensaje: id(),
   });
   const codigo = orden.codigo;
+  const fechaHora = orden.fecha_cita;
   console.log(gris(`    ${codigo}: ${orden.vehiculo.marca} ${orden.vehiculo.modelo} de ${orden.cliente.nombre}, cita ${fechaHora}, garantía del vehículo ${orden.garantia.vigente ? 'vigente' : 'no vigente'}`));
+  revisar(fechaHora === reserva.fecha_hora && orden.sede.codigo === sede, 'la cita quedó en la hora y la sede apartadas');
+  revisar(
+    orden.prediagnostico.especialidad === pre.especialidad && orden.prediagnostico.fuente === pre.fuente && orden.mensajes_cliente.length > 0,
+    'agendar_cita usó el prediagnóstico guardado (no lo recalculó)',
+  );
+  revisar(orden.por_garantia === (c.porGarantia ?? false) && (!c.porGarantia || orden.motivo_reclamo === c.motivoReclamo), 'la orden guarda por_garantia y motivo_reclamo');
   revisar(orden.siguiente_paso.responsable === 'mecanico' && orden.acciones_disponibles.includes('tomar_orden'), 'la orden dice que sigue el mecánico (tomar_orden)');
 
   // 3. Llega el carro: un mecánico de la sede la toma.

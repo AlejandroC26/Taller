@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { prediagnosticar, tiempoModeloMs } from './agente';
-import { decidirRuta, elegirSede, porPalabrasClave, validarSalidaModelo } from './reglas';
+import { codigoPrediagnostico, decidirRuta, elegirSede, motivoDecision, numeroPrediagnostico, porPalabrasClave, validarSalidaModelo } from './reglas';
 import type { SedeCatalogo, ServicioCatalogo } from './reglas';
 
 const catalogo: ServicioCatalogo[] = [
@@ -60,11 +60,11 @@ describe('prediagnóstico por reglas', () => {
 });
 
 describe('agente de prediagnóstico', () => {
-  it('espera al modelo 8 s por defecto; LOCAL_TIEMPO_MS lo cambia dentro de 1 a 50 s', () => {
+  it('espera al modelo 8 s por defecto; LOCAL_TIEMPO_MS lo cambia dentro de 1 a 22 s', () => {
     expect(tiempoModeloMs({})).toBe(8_000);
     expect(tiempoModeloMs({ LOCAL_TIEMPO_MS: '15000' })).toBe(15_000);
     expect(tiempoModeloMs({ LOCAL_TIEMPO_MS: '10' })).toBe(1_000);
-    expect(tiempoModeloMs({ LOCAL_TIEMPO_MS: '999999' })).toBe(50_000);
+    expect(tiempoModeloMs({ LOCAL_TIEMPO_MS: '999999' })).toBe(22_000);
     expect(tiempoModeloMs({ LOCAL_TIEMPO_MS: 'abc' })).toBe(8_000);
   });
 
@@ -97,5 +97,29 @@ describe('agente de prediagnóstico', () => {
       throw new Error('x');
     });
     expect(r).toMatchObject({ ruta: 'revision_general', taller: { codigo: 'PL-CENTRO' } });
+  });
+});
+
+describe('prediagnóstico guardado', () => {
+  const sede = { nombre: 'Pulgas Locas Frenos y Suspensión' };
+
+  it('códigos PD-0001', () => {
+    expect(codigoPrediagnostico(1)).toBe('PD-0001');
+    expect(numeroPrediagnostico('PD-0001')).toBe(1);
+    expect(numeroPrediagnostico('pd12')).toBe(12);
+    expect(numeroPrediagnostico('RS-0001')).toBeNull();
+  });
+
+  it('motivo_decision explica en frases cortas por qué va a esa sede', () => {
+    expect(motivoDecision({ ruta: 'especializada', especialidad: 'frenos', confianza: 0.9 }, sede, ['Cambio de pastillas de freno'])).toBe(
+      'Lo que cuenta el cliente apunta a frenos (cambio de pastillas de freno). Por eso va directo a Pulgas Locas Frenos y Suspensión, la sede especialista.',
+    );
+    expect(motivoDecision({ ruta: 'revision_general', especialidad: 'mantenimiento_general', confianza: 0 }, { nombre: 'Pulgas Locas Centro' })).toContain(
+      'no hay una especialidad clara. Por eso va primero a revisión general en Pulgas Locas Centro',
+    );
+    expect(motivoDecision({ ruta: 'revision_general', especialidad: 'transmision', confianza: 0.9 }, { nombre: 'Pulgas Locas Centro' })).toContain(
+      'no hay una sede especialista activa',
+    );
+    expect(motivoDecision({ ruta: 'revision_general', especialidad: 'frenos', confianza: 0 }, null)).toContain('no hay una sede activa');
   });
 });

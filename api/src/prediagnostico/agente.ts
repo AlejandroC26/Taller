@@ -30,11 +30,13 @@ const ESQUEMA = {
 };
 
 // Cuánto se espera al modelo antes de usar las reglas. Corto a propósito: el concesionario
-// llama prediagnosticar mientras el cliente espera en el chat, y un modelo local en CPU
-// puede tardar más de 20 s. LOCAL_TIEMPO_MS lo cambia (entre 1 y 50 s).
+// llama prediagnosticar mientras el cliente espera en el chat y pidió respuesta en menos de
+// 30 s, y un modelo local en CPU puede tardar más de 20 s. LOCAL_TIEMPO_MS lo cambia
+// (entre 1 y 22 s, para que siempre quede tiempo de responder con las reglas).
+export const TOPE_MODELO_MS = 22_000;
 export const tiempoModeloMs = (entorno: Record<string, string | undefined> = process.env) => {
   const ms = Number(entorno.LOCAL_TIEMPO_MS);
-  return Number.isFinite(ms) && ms > 0 ? Math.min(Math.max(ms, 1_000), 50_000) : 8_000;
+  return Number.isFinite(ms) && ms > 0 ? Math.min(Math.max(ms, 1_000), TOPE_MODELO_MS) : 8_000;
 };
 
 // Llamada sin streaming a /chat/completions, con salida JSON. Si no hay LOCAL_URL no se

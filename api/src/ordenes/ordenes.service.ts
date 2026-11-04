@@ -6,13 +6,17 @@ import { conflicto, invalido, noDisponible, noEncontrado, prohibido } from '../c
 import { manoObraRealizada } from '../cotizaciones/reglas';
 import { Diagnostico } from '../diagnosticos/diagnostico.entity';
 import { avisarDespacho, encolar } from '../integraciones/bandeja';
+import { conKilometraje, garantiaProbable } from '../garantias/reglas';
 import { prediagnosticar } from '../prediagnostico/agente';
+import { PrediagnosticoGuardado } from '../prediagnostico/prediagnostico.entity';
+import { codigoPrediagnostico, motivoDecision, numeroPrediagnostico } from '../prediagnostico/reglas';
 import type { Prediagnostico } from '../prediagnostico/reglas';
 import { aRelacion, descripcionVehiculo, obtenerRelacion } from '../relaciones/relaciones.service';
 import { Reparacion } from '../reparaciones/reparacion.entity';
 import { catalogoServicios } from '../servicios/servicios.service';
-import { exigirFranjaLibre, fechaLocal, isoColombia } from '../talleres/reglas';
-import { aTaller, buscarTaller, disponibilidad } from '../talleres/talleres.service';
+import { codigoReserva, exigirFranjaLibre, fechaLocal, isoColombia } from '../talleres/reglas';
+import { ReservaFranja } from '../talleres/reserva.entity';
+import { aTaller, buscarTaller, disponibilidad, reservaParaAgendar } from '../talleres/talleres.service';
 import { Taller } from '../talleres/taller.entity';
 import type { Actor } from '../usuarios/actor';
 import { Usuario } from '../usuarios/usuario.entity';
@@ -180,21 +184,34 @@ export async function unaOrden(actor: Actor, codigo: string) {
 
 const mensajes = z.array(z.union([z.string().trim().min(1), z.object({ texto: z.string().trim().min(1), fecha: z.string().optional() })]));
 
-export const prediagnosticarDto = z.object({
-  idRelacion: z.string().trim().min(1, 'Falta el id_relacion'),
-  mensajesCliente: mensajes.min(1, 'Envíe al menos un mensaje del cliente'),
-});
+export const prediagnosticarDto = z
+  .object({
+    idRelacion: z.string().trim().min(1, 'Falta el id_relacion'),
+    mensajesCliente: mensajes.optional(),
+    vin: z.string().trim().toUpperCase().length(17, 'El VIN tiene 17 caracteres').optional(),
+    porGarantia: z.boolean().optional(),
+    motivoReclamo: z.string().trim().min(1).max(1000).optional(),
+    kilometraje: z.number().int().min(0).optional(),
+  })
+  .refine((d) => (d.mensajesCliente?.length ?? 0) > 0 || !!d.motivoReclamo, {
+    message: 'Envíe al menos un mensaje del cliente o el motivo del reclamo',
+    path: ['mensajesCliente'],
+  });
 
-export const citaDto = z.object({
-  idRelacion: z.string().trim().min(1, 'Falta el id_relacion'),
-  fechaHora: z.iso.datetime({ offset: true, message: 'Fecha y hora ISO 8601 con zona; por ejemplo 2026-10-27T09:00:00-05:00' }),
-  taller: z.union([z.number().int().positive(), z.string().trim().min(2)]).optional(),
-  mensajesCliente: mensajes.default([]),
-  sintomas: z.string().trim().max(2000).default(''),
-  kilometraje: z.number().int().min(0).optional(),
-  porGarantia: z.boolean().default(false),
-  motivoReclamo: z.string().trim().max(1000).optional(),
-});
+export const citaDto = z
+  .object({
+    idRelacion: z.string().trim().min(1, 'Falta el id_relacion'),
+    fechaHora: z.iso.datetime({ offset: true, message: 'Fecha y hora ISO 8601 con zona; por ejemplo 2026-10-27T09:00:00-05:00' }).optional(),
+    taller: z.union([z.number().int().positive(), z.string().trim().min(2)]).optional(),
+    idPrediagnostico: z.string().trim().min(1).optional(),
+    idReserva: z.string().trim().min(1).optional(),
+    mensajesCliente: mensajes.default([]),
+    sintomas: z.string().trim().max(2000).default(''),
+    kilometraje: z.number().int().min(0).optional(),
+    porGarantia: z.boolean().optional(),
+    motivoReclamo: z.string().trim().max(1000).optional(),
+  })
+  .refine((d) => !!d.fechaHora || !!d.idReserva, { message: 'Envíe fecha_hora o id_reserva', path: ['fechaHora'] });
 
 const textoMensajes = (m: z.infer<typeof mensajes>) => m.map((x) => (typeof x === 'string' ? x : x.texto));
 const aMensajes = (m: z.infer<typeof mensajes>) =>
@@ -209,9 +226,10 @@ export async function prediagnosticoDe(textos: string[], vehiculo: string): Prom
   return prediagnosticar(textos, vehiculo, await catalogoServicios(), await sedesCatalogo());
 }
 
-// El concesionario espera hasta 60 s. Si algo se demora más (el concesionario real, la
-// base), es mejor un error claro que un corte de conexión.
-export const PLAZO_PREDIAGNOSTICO_MS = 45_000;
+// El concesionario pidió respuesta en menos de 30 s. El modelo tiene como máximo 22 s
+// (tiempoModeloMs) y después responden las reglas; si aun así algo se demora más (el
+// concesionario real, la base), es mejor un error claro que un corte de conexión.
+export const PLAZO_PREDIAGNOSTICO_MS = 28_000;
 
 export async function consultarPrediagnostico(datos: z.infer<typeof prediagnosticarDto>, plazoMs = PLAZO_PREDIAGNOSTICO_MS) {
   let reloj: ReturnType<typeof setTimeout> | undefined;
@@ -227,43 +245,94 @@ export async function consultarPrediagnostico(datos: z.infer<typeof prediagnosti
 
 async function armarPrediagnostico(datos: z.infer<typeof prediagnosticarDto>) {
   const relacion = await obtenerRelacion(datos.idRelacion);
-  const pre = await prediagnosticoDe(textoMensajes(datos.mensajesCliente), descripcionVehiculo(relacion));
+  if (datos.vin && datos.vin !== relacion.vin.toUpperCase()) {
+    throw invalido(`El VIN ${datos.vin} no corresponde al id_relacion ${relacion.idRelacion}`);
+  }
+  const mensajesCliente = datos.mensajesCliente ?? [];
+  const porGarantia = datos.porGarantia ?? false;
+  // El motivo del reclamo también describe la falla: el modelo lo lee con los mensajes.
+  const textos = [...(datos.motivoReclamo ? [datos.motivoReclamo] : []), ...textoMensajes(mensajesCliente)];
+  const pre = await prediagnosticoDe(textos, descripcionVehiculo(relacion));
   const servicios = (await catalogoServicios()).filter((s) => pre.servicios.includes(s.sku));
-  // La sede completa, con su ubicación, para que el concesionario se la muestre al cliente.
-  const sede = pre.taller ? aTaller(await buscarTaller(pre.taller.id)) : null;
+  // La sede completa, con su ubicación y horario, para que el concesionario se la muestre al cliente.
+  const entidad = pre.taller ? await buscarTaller(pre.taller.id) : null;
+  const sede = entidad ? aTaller(entidad) : null;
+  const guardado = await (await bd()).getRepository(PrediagnosticoGuardado).save({
+    relacion,
+    taller: entidad,
+    resultado: pre,
+    mensajesCliente: aMensajes(mensajesCliente.length ? mensajesCliente : textos),
+    porGarantia,
+    motivoReclamo: datos.motivoReclamo ?? (porGarantia ? 'Reclamo de garantía' : null),
+    kilometraje: datos.kilometraje ?? null,
+  });
+  const { taller: _sedeCorta, ...resultado } = pre;
   return {
+    id_prediagnostico: codigoPrediagnostico(guardado.id),
     id_relacion: relacion.idRelacion,
     vehiculo: descripcionVehiculo(relacion),
-    garantia: relacion.garantia,
-    ...pre,
+    ...resultado,
+    taller: sede,
+    motivo_decision: motivoDecision(pre, sede, servicios.map((s) => s.nombre)),
+    garantia: garantiaProbable(conKilometraje(relacion.garantia, datos.kilometraje), pre.especialidad, textos.join(' ')),
+    por_garantia: porGarantia,
+    motivo_reclamo: guardado.motivoReclamo,
     servicios_probables: servicios.map((s) => ({ sku: s.sku, nombre: s.nombre, precio_mano_obra: s.precioManoObra })),
+    // Igual que taller; se conserva para los clientes que ya la leían.
     sede_sugerida: sede,
     siguiente_paso: {
       responsable: 'concesionario',
-      descripcion:
-        pre.ruta === 'especializada'
-          ? 'Agende la cita en la sede especializada sugerida (consultar_disponibilidad → agendar_cita)'
-          : 'El cliente no sabe qué tiene: agende la cita en la sede de mantenimiento para revisión general',
+      descripcion: sede
+        ? `Consultar disponibilidad en ${sede.codigo} (consultar_disponibilidad con desde y hasta), apartar la hora con reservar_franja y agendar con agendar_cita enviando id_prediagnostico`
+        : 'No hay sedes activas para agendar: avise al taller',
     },
-    acciones_disponibles: ['consultar_disponibilidad', 'agendar_cita'],
+    acciones_disponibles: sede ? ['consultar_disponibilidad', 'reservar_franja', 'agendar_cita'] : [],
   };
+}
+
+// El prediagnóstico con el que se va a agendar: debe ser del mismo vehículo.
+async function prediagnosticoParaAgendar(codigo: string, idRelacion: string): Promise<PrediagnosticoGuardado> {
+  const id = numeroPrediagnostico(codigo);
+  const guardado = id
+    ? await (await bd()).getRepository(PrediagnosticoGuardado).findOne({ where: { id }, relations: { relacion: true, taller: true } })
+    : null;
+  if (!guardado) throw noEncontrado(`No existe el prediagnóstico ${codigo}`);
+  if (guardado.relacion.idRelacion !== idRelacion) {
+    throw invalido(`El prediagnóstico ${codigoPrediagnostico(guardado.id)} es de otro id_relacion`);
+  }
+  return guardado;
 }
 
 export async function agendarCita(actor: Actor, datos: z.infer<typeof citaDto>) {
   const db = await bd();
   const relacion = await obtenerRelacion(datos.idRelacion);
-  const textos = textoMensajes(datos.mensajesCliente);
-  const pre = await prediagnosticoDe(textos.length ? textos : [datos.sintomas], descripcionVehiculo(relacion));
-  // Sin sede indicada, va a la que sugiere el prediagnóstico.
-  const sede = datos.taller !== undefined ? await buscarTaller(datos.taller) : pre.taller ? await buscarTaller(pre.taller.id) : null;
+  const guardado = datos.idPrediagnostico ? await prediagnosticoParaAgendar(datos.idPrediagnostico, relacion.idRelacion) : null;
+  const reserva = datos.idReserva ? await reservaParaAgendar(datos.idReserva, relacion.idRelacion) : null;
+  if (reserva && datos.fechaHora && new Date(datos.fechaHora).getTime() !== reserva.fechaHora.getTime()) {
+    throw invalido(`La reserva ${codigoReserva(reserva.id)} es para ${isoColombia(reserva.fechaHora)}, no para ${datos.fechaHora}`);
+  }
+  const fechaHora = datos.fechaHora ?? isoColombia(reserva!.fechaHora);
+  const mensajesCliente = datos.mensajesCliente.length ? datos.mensajesCliente : (guardado?.mensajesCliente ?? []);
+  const textos = textoMensajes(mensajesCliente);
+  // Con id_prediagnostico se usa lo que ya se le dijo al cliente: no se vuelve a llamar al modelo.
+  const pre = guardado?.resultado ?? (await prediagnosticoDe(textos.length ? textos : [datos.sintomas], descripcionVehiculo(relacion)));
+  const porGarantia = datos.porGarantia ?? guardado?.porGarantia ?? false;
+  const motivoReclamo = datos.motivoReclamo ?? guardado?.motivoReclamo ?? undefined;
+  // La sede: la indicada, si no la de la reserva y si no la del prediagnóstico.
+  const idSede = datos.taller ?? reserva?.taller.id ?? pre.taller?.id;
+  const sede = idSede !== undefined ? await buscarTaller(idSede) : null;
   if (!sede) throw invalido('No hay sedes activas para agendar');
   if (!sede.activo) throw invalido(`La sede ${sede.nombre} no está activa`);
+  if (reserva && reserva.taller.id !== sede.id) {
+    throw invalido(`La reserva ${codigoReserva(reserva.id)} es en ${reserva.taller.nombre}, no en ${sede.nombre}`);
+  }
   // Antes que la franja: si el vehículo ya tiene una orden abierta, ese es el motivo que el
   // cliente debe oír (dentro de la transacción se vuelve a revisar, por si llegan dos a la vez).
   const yaAbierta = await db.getRepository(Orden).findOne({ where: { relacion: { idRelacion: relacion.idRelacion }, estado: In([...ABIERTOS]) } });
   if (yaAbierta) throw conflicto(`El vehículo ya tiene la orden ${codigoOrden(yaAbierta.id)} abierta`);
-  const { franjas } = await disponibilidad(sede.id, fechaLocal(datos.fechaHora));
-  exigirFranjaLibre(franjas, datos.fechaHora);
+  // La hora que este vehículo apartó no cuenta como ocupada para él.
+  const { franjas } = await disponibilidad(sede.id, fechaLocal(fechaHora), relacion.idRelacion);
+  exigirFranjaLibre(franjas, fechaHora);
 
   const codigo = await db.transaction(async (tx) => {
     const abierta = await tx.findOne(Orden, { where: { relacion: { idRelacion: relacion.idRelacion }, estado: In([...ABIERTOS]) } });
@@ -272,17 +341,24 @@ export async function agendarCita(actor: Actor, datos: z.infer<typeof citaDto>) 
       tx.create(Orden, {
         relacion,
         taller: sede,
-        fechaCita: new Date(datos.fechaHora),
-        mensajesCliente: aMensajes(datos.mensajesCliente),
+        fechaCita: new Date(fechaHora),
+        mensajesCliente: aMensajes(mensajesCliente),
         sintomas: datos.sintomas || textos.join(' '),
         prediagnostico: pre,
-        kilometraje: datos.kilometraje ?? relacion.kilometraje,
-        porGarantia: datos.porGarantia,
-        motivoReclamo: datos.porGarantia ? (datos.motivoReclamo ?? 'Reclamo de garantía') : null,
+        kilometraje: datos.kilometraje ?? guardado?.kilometraje ?? relacion.kilometraje,
+        porGarantia,
+        motivoReclamo: porGarantia ? (motivoReclamo ?? 'Reclamo de garantía') : null,
         creadaPor: { id: actor.id },
-        historial: [paso('agendada', nombreDe(actor), `Cita en ${sede.nombre}${datos.porGarantia ? ' — por garantía' : ''}`)],
+        historial: [paso('agendada', nombreDe(actor), `Cita en ${sede.nombre}${porGarantia ? ' — por garantía' : ''}`)],
       }),
     );
+    // Con la cita creada, las horas que este vehículo tenía apartadas ya no hacen falta.
+    await tx
+      .createQueryBuilder()
+      .update(ReservaFranja)
+      .set({ usada: true })
+      .where('id_relacion = :rel AND usada = false', { rel: relacion.idRelacion })
+      .execute();
     orden.relacion = relacion;
     orden.taller = sede;
     await encolar(tx, 'concesionario', 'notificar_estado_vehiculo', {

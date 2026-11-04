@@ -106,3 +106,45 @@ export function decidirComoConcesionario(cobertura: Cobertura, s: ServicioAValid
   if (s.evidencias.length === 0) return no('Sin evidencias que respalden el dictamen');
   return { tareaId: s.tareaId, valida: true, motivo: `Garantía válida: ${NOMBRE_CAUSA[s.causa].toLowerCase()}` };
 }
+
+// ---------- Estimación antes de ver el carro ----------
+
+// Pistas en lo que cuenta el cliente. Es solo una estimación para el concesionario: la
+// causa la dictamina el mecánico. Se revisan en este orden y gana la primera que aparece.
+const PISTAS_CAUSA: [Causa, string[]][] = [
+  ['mala_instalacion_taller', ['despues del servicio', 'despues de la reparacion', 'desde que lo arreglaron', 'mal instalad', 'quedo mal instalad']],
+  ['repuesto_defectuoso', ['repuesto nuevo', 'pieza nueva', 'recien cambiad', 'acabo de cambiar', 'le cambiaron hace poco']],
+  ['manipulacion_cliente', ['choque', 'me chocaron', 'lo modifique', 'modificad', 'lo arregle yo', 'yo mismo', 'inundad']],
+  ['defecto_fabrica', ['desde que lo compre', 'desde nuevo', 'de fabrica', 'recien comprado', 'carro nuevo']],
+  ['desgaste_normal', ['chill', 'rechin', 'gastad', 'desgast']],
+];
+
+const sinTildes = (texto: string) =>
+  texto
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase();
+
+export function causaProbable(texto: string): Causa | null {
+  const limpio = sinTildes(texto);
+  return PISTAS_CAUSA.find(([, pistas]) => pistas.some((p) => limpio.includes(p)))?.[0] ?? null;
+}
+
+// El kilometraje que reporta el cliente puede ser más nuevo que el del concesionario: si ya
+// pasó el límite, la garantía tampoco está vigente.
+export function conKilometraje(cobertura: Cobertura, kilometraje?: number): Cobertura {
+  if (kilometraje === undefined || !cobertura.vigente || kilometraje <= cobertura.kmMaximo) return cobertura;
+  return {
+    ...cobertura,
+    vigente: false,
+    motivo: `El vehículo superó los ${cobertura.kmMaximo.toLocaleString('es-CO')} km de la garantía`,
+  };
+}
+
+// La garantía del vehículo con lo que probablemente pase en el taller: aplica si está
+// vigente, cubre el sistema y la causa probable no la excluye (desgaste o manipulación).
+export function garantiaProbable(cobertura: Cobertura, especialidad: Especialidad, texto: string) {
+  const causa = causaProbable(texto);
+  const aplica = cobertura.vigente && cobertura.cubre.includes(especialidad) && (causa === null || dictamenSugerido(causa));
+  return { ...cobertura, aplica_probable: aplica, causa_probable: causa };
+}
