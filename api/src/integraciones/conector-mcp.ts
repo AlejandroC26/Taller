@@ -37,7 +37,9 @@ export async function llamarMcp(
   const transporte = new StreamableHTTPClientTransport(new URL(conexion.url), {
     requestInit: conexion.token ? { headers: { Authorization: `Bearer ${conexion.token}` } } : undefined,
   });
-  const cliente = new Client({ name: 'taller', version: '1.0.0' }, { versionNegotiation: { mode: 'auto' } });
+  // Negociación clásica (initialize directo): el modo 'auto' manda antes una sonda que los
+  // servidores de los otros equipos rechazan, y cada intento les gasta una petición del cupo.
+  const cliente = new Client({ name: 'taller', version: '1.0.0' });
   let reloj: ReturnType<typeof setTimeout> | undefined;
   const limite = new Promise<never>((_, rechazar) => {
     reloj = setTimeout(() => rechazar(new Error(`El MCP de ${nombre} no respondió en ${tiempoMs / 1000} s`)), tiempoMs);

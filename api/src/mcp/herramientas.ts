@@ -280,7 +280,11 @@ export function crearServidorMcp(actor: Actor): McpServer {
         annotations: LECTURA,
       },
       ({ estado, taller, id_relacion, abiertas }) =>
-        seguro(() => listarOrdenes(actor, validar(filtroOrdenesDto, { estado, tallerId: taller, idRelacion: id_relacion, abiertas }))),
+        seguro(async () => {
+          const ordenes = await listarOrdenes(actor, validar(filtroOrdenesDto, { estado, tallerId: taller, idRelacion: id_relacion, abiertas }));
+          // Los agentes no necesitan los datos personales del cliente en el listado (la web sí).
+          return ordenes.map(({ cliente: _cliente, ...orden }) => orden);
+        }),
     ),
   );
 

@@ -271,6 +271,16 @@ describe('MCP para agentes y orquestadores', () => {
     );
   });
 
+  it('listar_ordenes no les envía a los agentes los datos personales del cliente', async () => {
+    vi.mocked(ordenes.listarOrdenes).mockResolvedValueOnce([
+      { ...orden, cliente: { cedula: '123', nombre: 'Laura', telefono: '300' } } as unknown as Awaited<ReturnType<typeof ordenes.listarOrdenes>>[number],
+    ]);
+    const r = await (await conectar('agente')).callTool({ name: 'listar_ordenes', arguments: { id_relacion: 'REL-1001' } });
+    const { elementos } = r.structuredContent as { elementos: Record<string, unknown>[] };
+    expect(elementos[0]).toMatchObject({ codigo: 'OT-0001' });
+    expect(elementos[0]).not.toHaveProperty('cliente');
+  });
+
   it('agendar_cita sin fecha_hora ni id_reserva es un error de entrada', async () => {
     const r = await (await conectar('agente')).callTool({ name: 'agendar_cita', arguments: { id_relacion: 'REL-1005', id_prediagnostico: 'PD-0001' } });
     expect(r.isError).toBe(true);
