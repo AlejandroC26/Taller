@@ -12,7 +12,8 @@ export const CONTRATO: Record<Destino, { descripcion: string; herramientas: Reco
       decodificar_vin: '{ vin } → marca, modelo, versión, carrocería, puertas, motor…',
       validar_garantia:
         '{ codigo, id_relacion, vin, por_garantia, motivo_reclamo, servicios[{ tarea_id, sku, especialidad, causa, aplica, motivo, evidencias[url] }] } → responde llamando registrar_resultado_garantia en el MCP del taller',
-      notificar_estado_vehiculo: '{ codigo, id_relacion, placa, sede, estado, nota, fecha } → acuse de recibo',
+      notificar_estado_vehiculo:
+        '{ codigo, id_relacion, placa, sede (código, por ejemplo PL-FRENOS), estado, nota? (hasta 300), fecha (ISO -05:00) } → acuse de recibo',
     },
   },
   facturacion: {
@@ -63,4 +64,66 @@ export function tiendasConfiguradas(entorno: Record<string, string | undefined> 
     });
   }
   return tiendas;
+}
+
+// ---------- Mensajes al concesionario, con los límites de su MCP ----------
+
+const ZONA_COLOMBIA_MS = 5 * 3_600_000;
+const enColombia = (instante: Date) => `${new Date(instante.getTime() - ZONA_COLOMBIA_MS).toISOString().slice(0, 19)}-05:00`;
+const recortar = (texto: string, maximo: number) => (texto.length > maximo ? `${texto.slice(0, maximo - 1)}…` : texto);
+
+// notificar_estado_vehiculo: la sede va por código, la nota hasta 300 caracteres (sin
+// nota si no hay) y la fecha en hora de Colombia.
+export function avisoEstado(
+  d: { codigo: string; idRelacion: string; placa: string; sede: string; estado: string; nota?: string | null },
+  ahora = new Date(),
+) {
+  return {
+    codigo: d.codigo,
+    id_relacion: d.idRelacion,
+    placa: d.placa,
+    sede: d.sede,
+    estado: d.estado,
+    ...(d.nota ? { nota: recortar(d.nota, 300) } : {}),
+    fecha: enColombia(ahora),
+  };
+}
+
+export interface ServicioSolicitud {
+  tareaId: number;
+  sku: string;
+  especialidad: string;
+  causa: string | null;
+  aplica: boolean;
+  motivo: string | null;
+  evidencias: string[];
+}
+
+// validar_garantia: motivo_reclamo hasta 300 caracteres y solo si hay; los campos sin
+// valor no se envían (su MCP no acepta null); hasta 20 evidencias por servicio.
+export function solicitudGarantia(d: {
+  codigo: string;
+  idRelacion: string;
+  vin: string;
+  porGarantia: boolean;
+  motivoReclamo: string | null;
+  servicios: ServicioSolicitud[];
+}) {
+  return {
+    codigo: d.codigo,
+    id_relacion: d.idRelacion,
+    vin: d.vin,
+    por_garantia: d.porGarantia,
+    ...(d.motivoReclamo ? { motivo_reclamo: recortar(d.motivoReclamo, 300) } : {}),
+    servicios: d.servicios.map((s) => ({
+      tarea_id: s.tareaId,
+      sku: s.sku,
+      especialidad: s.especialidad,
+      ...(s.causa ? { causa: s.causa } : {}),
+      aplica: s.aplica,
+      ...(s.motivo ? { motivo: s.motivo } : {}),
+      evidencias: s.evidencias.slice(0, 20),
+    })),
+    responder_con: 'registrar_resultado_garantia',
+  };
 }

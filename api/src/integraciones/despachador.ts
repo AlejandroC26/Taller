@@ -1,5 +1,6 @@
 import { In } from 'typeorm';
 import { bd } from '../base-datos/conexion';
+import { avisarDespacho } from './bandeja';
 import { CONTRATO, configuracion } from './contrato';
 import { llamarHerramienta, SinConexion } from './conector-mcp';
 import { DESTINOS, EventoIntegracion } from './evento.entity';
@@ -9,6 +10,8 @@ export const MAXIMO_INTENTOS = 5;
 // Facturación tarda de 20 a 35 s en dar el acuse de crear_cotizacion (le pregunta a la
 // tienda antes de responder). La bandeja trabaja en segundo plano: se le da margen.
 export const TIEMPO_ENVIO_MS = 90_000;
+// Un minuto entre reintentos: alcanza para que pase el límite por minuto del concesionario.
+export const ESPERA_REINTENTO_MS = 60_000;
 
 export type CambioEvento = Partial<Pick<EventoIntegracion, 'estado' | 'intentos' | 'enviadoEn' | 'ultimoError' | 'respuesta'>>;
 
@@ -30,26 +33,51 @@ export async function intentarEnvio(
     const mensaje = (error as Error).message;
     if (error instanceof SinConexion) return { estado: 'desactivado', ultimoError: mensaje };
     const intentos = evento.intentos + 1;
+    // Con las credenciales rechazadas, reintentar solo suma fallos (el concesionario bloquea
+    // la IP con 10 en 5 minutos): queda fallido hasta corregir el token y usar reintentar_envios.
+    if (rechazoDelServidor(mensaje) === 'credenciales') {
+      return { estado: 'fallido', intentos, ultimoError: `Credenciales o acceso rechazados: revise MCP_${evento.destino.toUpperCase()}_TOKEN y _URL. ${mensaje}` };
+    }
     return { estado: intentos >= MAXIMO_INTENTOS ? 'fallido' : 'pendiente', intentos, ultimoError: mensaje };
   }
 }
 
+// Rechazos que no se arreglan reintentando enseguida: credenciales o acceso (401, 403) y
+// límite de llamadas (429).
+export function rechazoDelServidor(mensaje: string | null | undefined): 'credenciales' | 'limite' | null {
+  if (!mensaje) return null;
+  if (/\b429\b|Too Many Requests/i.test(mensaje)) return 'limite';
+  if (/\b40[13]\b|Credenciales no válidas|Unauthorized|Forbidden|denied access/i.test(mensaje)) return 'credenciales';
+  return null;
+}
+
 let enCurso = false;
 
-// Envía los eventos pendientes, del más viejo al más nuevo.
+// Envía los eventos pendientes, del más viejo al más nuevo. Si un destino rechaza las
+// credenciales o pide esperar (429), no se le envía nada más en esta vuelta.
 export async function despachar(limite = 20, llamar: Llamar = llamarHerramienta) {
   if (enCurso) return { enviados: 0, pendientes: 0, fallidos: 0, desactivados: 0, enCurso: true };
   enCurso = true;
   const resumen = { enviados: 0, pendientes: 0, fallidos: 0, desactivados: 0 };
+  const detenidos = new Set<Destino>();
   try {
     const repo = (await bd()).getRepository(EventoIntegracion);
     const lista = await repo.find({ where: { estado: 'pendiente' }, order: { id: 'ASC' }, take: limite });
     for (const evento of lista) {
+      if (detenidos.has(evento.destino)) {
+        resumen.pendientes++;
+        continue;
+      }
       const cambios = await intentarEnvio(evento, llamar);
+      if (rechazoDelServidor(cambios.ultimoError)) detenidos.add(evento.destino);
       await repo.update(evento.id, cambios);
-      const clave = { enviado: 'enviados', pendiente: 'pendientes', fallido: 'fallidos', desactivado: 'desactivados' } as const;
+      // intentarEnvio nunca descarta: eso solo se hace a mano.
+      const clave = { enviado: 'enviados', pendiente: 'pendientes', fallido: 'fallidos', desactivado: 'desactivados', descartado: 'desactivados' } as const;
       resumen[clave[cambios.estado ?? 'pendiente']]++;
     }
+    // Lo que quedó pendiente (un corte, un 429) se reintenta solo, con el mismo id_mensaje,
+    // sin esperar a que otra acción del taller dispare la bandeja.
+    if (resumen.pendientes > 0) avisarDespacho(ESPERA_REINTENTO_MS);
     return resumen;
   } finally {
     enCurso = false;

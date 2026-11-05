@@ -8,6 +8,7 @@ import { urlEvidencia } from '../diagnosticos/evidencias.service';
 import { Tarea } from '../diagnosticos/tarea.entity';
 import { avisarDespacho, encolar } from '../integraciones/bandeja';
 import { concesionario } from '../integraciones/concesionario';
+import { solicitudGarantia } from '../integraciones/contrato';
 import { unaVez } from '../integraciones/idempotencia';
 import type { Orden } from '../ordenes/orden.entity';
 import { cargarOrden, transicionar, unaOrden } from '../ordenes/ordenes.service';
@@ -56,23 +57,7 @@ export async function solicitarValidacion(tx: EntityManager, orden: Orden, tarea
   };
   const resultados = await concesionario().validarGarantia(solicitud);
   if (resultados) return aplicarResultado(tx, orden, resultados, CONCESIONARIO);
-  await encolar(tx, 'concesionario', 'validar_garantia', {
-    codigo: solicitud.codigo,
-    id_relacion: solicitud.idRelacion,
-    vin: solicitud.vin,
-    por_garantia: solicitud.porGarantia,
-    motivo_reclamo: solicitud.motivoReclamo,
-    servicios: servicios.map((s) => ({
-      tarea_id: s.tareaId,
-      sku: s.sku,
-      especialidad: s.especialidad,
-      causa: s.causa,
-      aplica: s.aplica,
-      motivo: s.motivo,
-      evidencias: s.evidencias,
-    })),
-    responder_con: 'registrar_resultado_garantia',
-  });
+  await encolar(tx, 'concesionario', 'validar_garantia', solicitudGarantia(solicitud));
 }
 
 // Guarda la respuesta del concesionario y sigue el proceso normal: cotización a

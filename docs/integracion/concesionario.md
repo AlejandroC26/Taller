@@ -302,9 +302,17 @@ Esta es la regla del concesionario simulado. Un concesionario real puede tener l
   "codigo": "OT-0037",
   "id_relacion": "REL-1007",
   "placa": "RPN908",
-  "sede": "Pulgas Locas Frenos y Suspensión",
+  "sede": "PL-FRENOS",
   "estado": "entregada",
   "nota": "Sale sin reparar",
-  "fecha": "2026-10-27T13:55:23.763Z"
+  "fecha": "2026-10-27T08:55:23-05:00"
 }
 ```
+
+**Formato hacia el MCP del concesionario.** `sede` va por código; `nota`, hasta 300 caracteres, y
+solo si hay. `fecha` va en hora de Colombia. En `validar_garantia`, `motivo_reclamo` va hasta 300
+caracteres y los campos sin valor no se envían. Si el concesionario rechaza las credenciales o el
+acceso (401 o 403), el mensaje queda `fallido` al primer intento: así no se suman fallos que
+bloqueen la IP. Se reenvía con `reintentar_envios` cuando se corrija la key o la URL. Con un 429 se
+deja de enviar a ese destino en esa vuelta. Lo que queda pendiente (un corte o un 429) se reintenta
+solo al minuto, con el mismo id_mensaje, hasta 5 intentos.

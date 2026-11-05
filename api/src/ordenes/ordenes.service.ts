@@ -6,6 +6,7 @@ import { conflicto, invalido, noDisponible, noEncontrado, prohibido } from '../c
 import { manoObraRealizada } from '../cotizaciones/reglas';
 import { Diagnostico } from '../diagnosticos/diagnostico.entity';
 import { avisarDespacho, encolar } from '../integraciones/bandeja';
+import { avisoEstado } from '../integraciones/contrato';
 import { conKilometraje, garantiaProbable } from '../garantias/reglas';
 import { prediagnosticar } from '../prediagnostico/agente';
 import { PrediagnosticoGuardado } from '../prediagnostico/prediagnostico.entity';
@@ -73,15 +74,12 @@ export async function transicionar(tx: EntityManager, orden: Orden, nuevo: Estad
   orden.estado = nuevo;
   orden.historial = [...orden.historial, paso(nuevo, nombreDe(actor), nota)];
   await tx.update(Orden, orden.id, { estado: nuevo, historial: orden.historial });
-  await encolar(tx, 'concesionario', 'notificar_estado_vehiculo', {
-    codigo: codigoOrden(orden.id),
-    id_relacion: orden.relacion.idRelacion,
-    placa: orden.relacion.placa,
-    sede: orden.taller.nombre,
-    estado: nuevo,
-    nota: nota ?? null,
-    fecha: new Date().toISOString(),
-  });
+  await encolar(
+    tx,
+    'concesionario',
+    'notificar_estado_vehiculo',
+    avisoEstado({ codigo: codigoOrden(orden.id), idRelacion: orden.relacion.idRelacion, placa: orden.relacion.placa, sede: orden.taller.codigo, estado: nuevo, nota }),
+  );
 }
 
 // La guía para orquestadores: qué falta, quién debe hacerlo y con qué herramientas.
@@ -361,19 +359,18 @@ export async function agendarCita(actor: Actor, datos: z.infer<typeof citaDto>) 
       .execute();
     orden.relacion = relacion;
     orden.taller = sede;
-    await encolar(tx, 'concesionario', 'notificar_estado_vehiculo', {
-      codigo: codigoOrden(orden.id),
-      id_relacion: relacion.idRelacion,
-      placa: relacion.placa,
-      sede: sede.nombre,
-      estado: 'agendada',
-      nota: null,
-      fecha: new Date().toISOString(),
-    });
+    await encolar(
+      tx,
+      'concesionario',
+      'notificar_estado_vehiculo',
+      avisoEstado({ codigo: codigoOrden(orden.id), idRelacion: relacion.idRelacion, placa: relacion.placa, sede: sede.codigo, estado: 'agendada', nota: `Cita en ${sede.nombre}` }),
+    );
     return codigoOrden(orden.id);
   });
   avisarDespacho();
-  return unaOrden(actor, codigo);
+  // El concesionario ya conoce a su cliente: la cita no devuelve sus datos personales.
+  const { cliente: _cliente, ...cita } = await unaOrden(actor, codigo);
+  return cita;
 }
 
 export async function cancelarCita(actor: Actor, codigo: string, motivo: string) {

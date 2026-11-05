@@ -178,7 +178,7 @@ async function correrCaso(nombre) {
   });
   const codigo = orden.codigo;
   const fechaHora = orden.fecha_cita;
-  console.log(gris(`    ${codigo}: ${orden.vehiculo.marca} ${orden.vehiculo.modelo} de ${orden.cliente.nombre}, cita ${fechaHora}, garantía del vehículo ${orden.garantia.vigente ? 'vigente' : 'no vigente'}`));
+  console.log(gris(`    ${codigo}: ${orden.vehiculo.marca} ${orden.vehiculo.modelo}, cita ${fechaHora}, garantía del vehículo ${orden.garantia.vigente ? 'vigente' : 'no vigente'}`));
   revisar(fechaHora === reserva.fecha_hora && orden.sede.codigo === sede, 'la cita quedó en la hora y la sede apartadas');
   revisar(
     orden.prediagnostico.especialidad === pre.especialidad && orden.prediagnostico.fuente === pre.fuente && orden.mensajes_cliente.length > 0,

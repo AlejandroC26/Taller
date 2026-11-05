@@ -3,7 +3,9 @@ import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeor
 export const DESTINOS = ['concesionario', 'facturacion'] as const;
 export type Destino = (typeof DESTINOS)[number];
 
-export const ESTADOS_EVENTO = ['pendiente', 'enviado', 'fallido', 'desactivado'] as const;
+// descartado: un mensaje que no debe salir nunca (por ejemplo, de pruebas viejas);
+// reintentar_envios no lo toca.
+export const ESTADOS_EVENTO = ['pendiente', 'enviado', 'fallido', 'desactivado', 'descartado'] as const;
 export type EstadoEvento = (typeof ESTADOS_EVENTO)[number];
 
 // Bandeja de salida hacia los otros proyectos. Los services escriben aquí dentro de su
