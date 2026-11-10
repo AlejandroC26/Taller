@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { concesionarioSimulado } from '../integraciones/concesionario/simulado/simulado';
 import { cabeceraSimulada, RELACIONES } from '../integraciones/concesionario/simulado/datos';
-import { causaProbable, coberturaDe, conKilometraje, decidirComoConcesionario, dictamenSugerido, garantiaProbable, pagadorPorCausa, requiereEvidencia } from './reglas';
+import { causaProbable, coberturaDe, conKilometraje, decidirComoConcesionario, dictamenSugerido, garantiaProbable, historialComponente, pagadorPorCausa, requiereEvidencia } from './reglas';
 import type { ServicioAValidar } from './reglas';
 
 const hoy = new Date('2026-10-26T12:00:00Z');
@@ -125,5 +125,60 @@ describe('garantía probable antes de ver el carro', () => {
     expect(conKilometraje(vigente, 98_000)).toMatchObject({ vigente: false, motivo: expect.stringContaining('60.000 km') });
     expect(conKilometraje(vigente, 30_000)).toBe(vigente);
     expect(conKilometraje(vigente)).toBe(vigente);
+  });
+});
+
+describe('historial de un componente (consultar_manipulacion)', () => {
+  const base = {
+    especialidad: 'frenos' as const,
+    sku: 'FRE-PASTILLAS',
+    causa: null,
+    completada: false,
+    conRepuestos: false,
+    texto: '',
+    actual: false,
+    fechaDiagnostico: new Date('2026-06-10T14:00:00Z'),
+    fechaReparacion: null,
+  };
+  const frenos = { especialidad: 'frenos' as const };
+
+  it('sin nada antes, no está manipulado', () => {
+    expect(historialComponente([], frenos)).toEqual({ manipulado: false, eventos: [] });
+    expect(historialComponente([{ ...base, codigo: 'OT-0012' }], frenos)).toEqual({ manipulado: false, eventos: [] });
+  });
+
+  it('una reparación o un cambio de repuesto en una orden anterior cuenta', () => {
+    const r = historialComponente(
+      [
+        { ...base, codigo: 'OT-0012', completada: true, conRepuestos: true, fechaReparacion: new Date('2026-06-11T15:00:00Z') },
+        { ...base, codigo: 'OT-0008', completada: true, fechaReparacion: new Date('2026-03-01T15:00:00Z') },
+      ],
+      frenos,
+    );
+    expect(r.manipulado).toBe(true);
+    expect(r.eventos.map((e) => [e.codigo, e.tipo])).toEqual([
+      ['OT-0008', 'reparacion'],
+      ['OT-0012', 'cambio_repuesto'],
+    ]);
+  });
+
+  it('la reparación de la orden actual no cuenta; sus hallazgos sí', () => {
+    expect(historialComponente([{ ...base, codigo: 'OT-0022', actual: true, completada: true }], frenos).manipulado).toBe(false);
+    const r = historialComponente([{ ...base, codigo: 'OT-0022', actual: true, causa: 'manipulacion_cliente' }], frenos);
+    expect(r.eventos).toEqual([expect.objectContaining({ tipo: 'manipulacion_cliente', codigo: 'OT-0022' })]);
+  });
+
+  it('el trabajo de otro taller sale de lo que escribe el mecánico; la mala instalación propia no cuenta', () => {
+    expect(historialComponente([{ ...base, codigo: 'OT-0030', texto: 'Pastillas no originales puestas en otro taller' }], frenos).eventos[0].tipo).toBe('otro_taller');
+    expect(historialComponente([{ ...base, codigo: 'OT-0031', causa: 'mala_instalacion_taller' }], frenos).manipulado).toBe(false);
+  });
+
+  it('filtra por especialidad y, si viene, por SKU', () => {
+    const tareas = [
+      { ...base, codigo: 'OT-0040', completada: true },
+      { ...base, codigo: 'OT-0041', especialidad: 'motor' as const, sku: 'MOT-BUJIAS', completada: true },
+    ];
+    expect(historialComponente(tareas, frenos).eventos.map((e) => e.codigo)).toEqual(['OT-0040']);
+    expect(historialComponente(tareas, { especialidad: 'frenos', sku: 'FRE-DISCOS' }).manipulado).toBe(false);
   });
 });

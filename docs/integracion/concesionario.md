@@ -22,6 +22,7 @@ Todas están en `POST /mcp` con un token de rol `agente`. Las que cambian algo a
 | `listar_ordenes` | `estado?`, `taller?`, `id_relacion?`, `abiertas?` | Órdenes filtradas. |
 | `consultar_diagnostico` | `codigo` | Servicios, causa, dictamen del mecánico, repuestos y evidencias. |
 | `consultar_evidencias` | `codigo` | Las evidencias con su URL de descarga. |
+| `consultar_manipulacion` | `vin`, `especialidad`, `sku?`, `id_relacion?`, `excluir_codigo?` | Mientras valida una garantía: si a ese componente ya se le hizo algo (`manipulado` y `eventos`). Ver abajo. |
 | `registrar_resultado_garantia` | `codigo`, `resultados[{ tarea_id, valida, motivo }]`, `id_mensaje?` | Responde a `validar_garantia`. La orden pasa a `en_cotizacion`. |
 | `registrar_salida` | `codigo`, `nota?`, `id_mensaje?` | El vehículo sale, pagado o sin reparar. |
 
@@ -207,6 +208,32 @@ consulte `listar_ordenes { id_relacion, abiertas: true }` y use esa orden.
 | Reserva ya usada o reemplazada | «La reserva RS-0012 ya no está vigente: aparte la hora de nuevo con reservar_franja» |
 | Reserva en otra sede u hora | «La reserva RS-0012 es en …, no en …» / «La reserva RS-0012 es para …, no para …» |
 | `id_relacion` desconocido | «El concesionario no reconoce el id_relacion REL-9999. El cliente debe obtenerlo en el concesionario con su cédula y el VIN» |
+
+### Ejemplo: consultar_manipulacion
+
+```json
+{ "vin": "9FBHJD204PM100001", "id_relacion": "REL-1001", "especialidad": "frenos", "sku": "FRE-PASTILLAS", "excluir_codigo": "OT-0022" }
+```
+
+```json
+{
+  "vin": "9FBHJD204PM100001",
+  "especialidad": "frenos",
+  "sku": "FRE-PASTILLAS",
+  "excluir_codigo": "OT-0022",
+  "manipulado": true,
+  "eventos": [{ "fecha": "2026-11-04T01:41:18-05:00", "tipo": "cambio_repuesto", "especialidad": "frenos", "sku": "FRE-PASTILLAS", "codigo": "OT-0004" }]
+}
+```
+
+`manipulado` es `true` si hay algún evento para esa especialidad (y ese SKU, si viene) del VIN:
+- `reparacion` / `cambio_repuesto`: un servicio hecho en una orden anterior, sin o con repuestos. La orden de `excluir_codigo` no cuenta.
+- `manipulacion_cliente`: un diagnóstico con esa causa, incluida la orden actual.
+- `otro_taller`: el mecánico escribió en el diagnóstico que vio trabajo de otro taller (por ejemplo «otro taller» o «taller externo»).
+
+La causa `mala_instalacion_taller` no cuenta: es trabajo del propio taller y esa garantía sí aplica.
+Se responde desde la copia local del taller, sin llamar a nadie (unos 50 ms), y sin datos personales.
+Si `id_relacion` no es el del VIN, responde «El VIN … no corresponde al id_relacion …».
 
 ### Ejemplo: registrar_resultado_garantia
 

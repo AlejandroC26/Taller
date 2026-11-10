@@ -303,7 +303,7 @@ acepta también el token fijo del usuario `agente-compartido` (rol `agente`, sin
 | Grupo | Herramientas |
 |---|---|
 | Orquestador | `describir_flujo`, `estado_orden`, `listar_ordenes` |
-| Concesionario | `listar_talleres`, `prediagnosticar`, `enrutar_garantia`, `consultar_disponibilidad`, `reservar_franja`, `agendar_cita`, `cancelar_cita` (`destructiveHint`), `consultar_evidencias`, `registrar_resultado_garantia` |
+| Concesionario | `listar_talleres`, `prediagnosticar`, `enrutar_garantia`, `consultar_disponibilidad`, `reservar_franja`, `agendar_cita`, `cancelar_cita` (`destructiveHint`), `consultar_evidencias`, `consultar_manipulacion`, `registrar_resultado_garantia` |
 | Facturación | `consultar_cotizacion`, `registrar_respuesta_cliente`, `registrar_pago` |
 | Mecánico | `mis_ordenes`, `tomar_orden`, `consultar_diagnostico`, `registrar_diagnostico`, `adjuntar_evidencia` (base64), `remitir_orden`, `finalizar_diagnostico`, `consultar_reparacion`, `registrar_horas`, `registrar_parte_usada`, `marcar_tarea`, `terminar_reparacion`, `consultar_servicios`, `buscar_repuestos_tienda` |
 | Administración | `registrar_taller`, `actualizar_taller`, `registrar_servicio`, `registrar_salida`, `consultar_bandeja`, `reintentar_envios` |

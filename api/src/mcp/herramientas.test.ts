@@ -271,6 +271,34 @@ describe('MCP para agentes y orquestadores', () => {
     );
   });
 
+  it('consultar_manipulacion traduce la entrada y publica manipulado y eventos', async () => {
+    const espia = vi.spyOn(garantias, 'consultarManipulacion').mockResolvedValueOnce({
+      vin: '9FBHJD204PM100001',
+      especialidad: 'frenos',
+      sku: 'FRE-PASTILLAS',
+      excluir_codigo: 'OT-0022',
+      manipulado: true,
+      eventos: [{ fecha: '2026-06-10T09:00:00-05:00', tipo: 'cambio_repuesto', especialidad: 'frenos', sku: 'FRE-PASTILLAS', codigo: 'OT-0012' }],
+    });
+    const cliente = await conectar('agente');
+    const herramienta = (await cliente.listTools()).tools.find((t) => t.name === 'consultar_manipulacion')!;
+    expect(herramienta.annotations?.readOnlyHint).toBe(true);
+    expect(herramienta.outputSchema?.required).toEqual(expect.arrayContaining(['manipulado', 'eventos']));
+    const r = await cliente.callTool({
+      name: 'consultar_manipulacion',
+      arguments: { vin: '9fbhjd204pm100001', id_relacion: 'REL-1001', especialidad: 'frenos', sku: 'fre-pastillas', excluir_codigo: 'OT-0022' },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(r.structuredContent).toMatchObject({ manipulado: true, eventos: [{ tipo: 'cambio_repuesto', codigo: 'OT-0012' }] });
+    expect(espia).toHaveBeenCalledWith({ vin: '9FBHJD204PM100001', idRelacion: 'REL-1001', especialidad: 'frenos', sku: 'FRE-PASTILLAS', excluirCodigo: 'OT-0022' });
+  });
+
+  it('consultar_manipulacion con un VIN inválido es un error de entrada', async () => {
+    const r = await (await conectar('agente')).callTool({ name: 'consultar_manipulacion', arguments: { vin: 'CORTO', especialidad: 'frenos' } });
+    expect(r.isError).toBe(true);
+    expect(texto(r)).toContain('17 caracteres');
+  });
+
   it('listar_ordenes no les envía a los agentes los datos personales del cliente', async () => {
     vi.mocked(ordenes.listarOrdenes).mockResolvedValueOnce([
       { ...orden, cliente: { cedula: '123', nombre: 'Laura', telefono: '300' } } as unknown as Awaited<ReturnType<typeof ordenes.listarOrdenes>>[number],

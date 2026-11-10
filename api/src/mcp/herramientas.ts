@@ -7,8 +7,8 @@ import { consultarCotizacion, pagoDto, registrarPago, registrarRespuestaCliente,
 import { buscarRepuestosParaOrden, finalizarDiagnostico, guardarDiagnostico, remitirOrden, verDiagnostico } from '../diagnosticos/diagnosticos.service';
 import { diagnosticoDto, remitirDto } from '../diagnosticos/dto';
 import { guardarEvidencia, listarEvidencias } from '../diagnosticos/evidencias.service';
-import { CAUSAS, PAGADORES } from '../garantias/reglas';
-import { registrarResultadoGarantia, resultadoGarantiaDto } from '../garantias/garantias.service';
+import { CAUSAS, PAGADORES, TIPOS_EVENTO_COMPONENTE } from '../garantias/reglas';
+import { consultarManipulacion, manipulacionDto, registrarResultadoGarantia, resultadoGarantiaDto } from '../garantias/garantias.service';
 import { estadoIntegraciones, reintentar } from '../integraciones/despachador';
 import { unaVez } from '../integraciones/idempotencia';
 import {
@@ -147,6 +147,18 @@ const SALIDA_DISPONIBILIDAD = z.looseObject({
   taller: SEDE_CON_HORARIO,
   cupo_por_franja: z.number(),
   franjas: z.array(FRANJA),
+});
+const SALIDA_MANIPULACION = z.looseObject({
+  manipulado: z.boolean(),
+  eventos: z.array(
+    z.looseObject({
+      fecha: z.string().describe('ISO 8601 con zona -05:00'),
+      tipo: z.enum(TIPOS_EVENTO_COMPONENTE),
+      especialidad: z.string(),
+      sku: z.string(),
+      codigo: z.string().describe('Orden del taller donde pasó; por ejemplo OT-0012'),
+    }),
+  ),
 });
 const SALIDA_RESERVA = z.looseObject({
   id_reserva: z.string().describe('RS-0001: envíelo en agendar_cita'),
@@ -474,6 +486,35 @@ export function crearServidorMcp(actor: Actor): McpServer {
         annotations: LECTURA,
       },
       ({ codigo: c }) => seguro(() => listarEvidencias(actor, c)),
+    ),
+  );
+
+  registrar(
+    'consultar_manipulacion',
+    servidor.registerTool(
+      'consultar_manipulacion',
+      {
+        title: 'Historial de un componente (manipulación)',
+        description:
+          'Para validar una garantía: dice si a ese componente del vehículo (especialidad y, si viene, SKU) ya se le hizo algo antes en el taller. ' +
+          'manipulado es true si una orden anterior lo reparó o le cambió repuestos (sin contar excluir_codigo), o si algún diagnóstico encontró manipulación del cliente ' +
+          'o trabajo de otro taller. La mala instalación del propio taller no cuenta. Responde al instante y sin datos personales.',
+        inputSchema: z.object({
+          vin: z.string().describe('VIN de 17 caracteres'),
+          id_relacion: z.string().optional().describe('Si se envía, debe ser el del VIN'),
+          especialidad: z.enum(ESPECIALIDADES),
+          sku: z.string().optional().describe('Servicio del catálogo; por ejemplo FRE-PASTILLAS'),
+          excluir_codigo: z.string().optional().describe('La orden que se está validando (sus reparaciones no se cuentan); por ejemplo OT-0022'),
+        }),
+        outputSchema: SALIDA_MANIPULACION,
+        annotations: LECTURA,
+      },
+      (e) =>
+        seguro(() =>
+          consultarManipulacion(
+            validar(manipulacionDto, { vin: e.vin, idRelacion: e.id_relacion, especialidad: e.especialidad, sku: e.sku, excluirCodigo: e.excluir_codigo }),
+          ),
+        ),
     ),
   );
 

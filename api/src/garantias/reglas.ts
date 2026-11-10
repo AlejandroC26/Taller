@@ -148,3 +148,56 @@ export function garantiaProbable(cobertura: Cobertura, especialidad: Especialida
   const aplica = cobertura.vigente && cobertura.cubre.includes(especialidad) && (causa === null || dictamenSugerido(causa));
   return { ...cobertura, aplica_probable: aplica, causa_probable: causa };
 }
+
+// ---------- Historial de un componente (consultar_manipulacion) ----------
+
+export const TIPOS_EVENTO_COMPONENTE = ['reparacion', 'cambio_repuesto', 'manipulacion_cliente', 'otro_taller'] as const;
+export type TipoEventoComponente = (typeof TIPOS_EVENTO_COMPONENTE)[number];
+
+// Un servicio diagnosticado a ese VIN, con lo necesario para saber si el componente ya se tocó.
+export interface TareaHistorial {
+  codigo: string;
+  // La orden que se está validando: sus reparaciones no cuentan, sus hallazgos sí.
+  actual: boolean;
+  especialidad: Especialidad;
+  sku: string;
+  causa: Causa | null;
+  completada: boolean;
+  conRepuestos: boolean;
+  // Descripción, motivo del dictamen y observaciones del mecánico.
+  texto: string;
+  fechaDiagnostico: Date;
+  fechaReparacion: Date | null;
+}
+
+export interface EventoComponente {
+  fecha: string;
+  tipo: TipoEventoComponente;
+  especialidad: Especialidad;
+  sku: string;
+  codigo: string;
+}
+
+// Lo que el mecánico escribe cuando ve trabajo de otro taller.
+const PISTAS_OTRO_TALLER = ['otro taller', 'taller externo', 'otro mecanico', 'taller particular'];
+
+// El componente (especialidad y, si viene, SKU) ya se tocó si una orden anterior lo reparó o
+// le cambió repuestos, o si algún diagnóstico encontró manipulación del cliente o trabajo de
+// otro taller. La mala instalación del propio taller no cuenta: esa garantía sí aplica.
+export function historialComponente(
+  tareas: TareaHistorial[],
+  filtro: { especialidad: Especialidad; sku?: string },
+  enZona: (fecha: Date) => string = (fecha) => fecha.toISOString(),
+): { manipulado: boolean; eventos: EventoComponente[] } {
+  const eventos: (EventoComponente & { orden: number })[] = [];
+  for (const t of tareas) {
+    if (t.especialidad !== filtro.especialidad || (filtro.sku && t.sku !== filtro.sku)) continue;
+    const evento = (tipo: TipoEventoComponente, fecha: Date) =>
+      eventos.push({ fecha: enZona(fecha), tipo, especialidad: t.especialidad, sku: t.sku, codigo: t.codigo, orden: fecha.getTime() });
+    if (!t.actual && t.completada) evento(t.conRepuestos ? 'cambio_repuesto' : 'reparacion', t.fechaReparacion ?? t.fechaDiagnostico);
+    if (t.causa === 'manipulacion_cliente') evento('manipulacion_cliente', t.fechaDiagnostico);
+    if (PISTAS_OTRO_TALLER.some((p) => sinTildes(t.texto).includes(p))) evento('otro_taller', t.fechaDiagnostico);
+  }
+  eventos.sort((a, b) => a.orden - b.orden);
+  return { manipulado: eventos.length > 0, eventos: eventos.map(({ orden: _orden, ...e }) => e) };
+}

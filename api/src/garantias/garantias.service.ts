@@ -12,10 +12,12 @@ import { solicitudGarantia } from '../integraciones/contrato';
 import { unaVez } from '../integraciones/idempotencia';
 import type { Orden } from '../ordenes/orden.entity';
 import { cargarOrden, transicionar, unaOrden } from '../ordenes/ordenes.service';
-import { codigoOrden } from '../ordenes/reglas';
+import { codigoOrden, numeroOrden } from '../ordenes/reglas';
+import { RelacionVehiculo } from '../relaciones/relacion.entity';
+import { ESPECIALIDADES, isoColombia } from '../talleres/reglas';
 import type { Actor } from '../usuarios/actor';
-import { pagadorPorCausa } from './reglas';
-import type { ResultadoGarantia, ServicioAValidar } from './reglas';
+import { historialComponente, pagadorPorCausa } from './reglas';
+import type { ResultadoGarantia, ServicioAValidar, TareaHistorial } from './reglas';
 
 // Quien firma en el historial cuando responde el concesionario simulado.
 const CONCESIONARIO: Actor = { id: '', nombre: 'Concesionario', apellido: '(simulado)', usuario: 'concesionario', rol: 'agente', tallerId: null };
@@ -96,4 +98,78 @@ export async function registrarResultadoGarantia(
     avisarDespacho();
     return unaOrden(actor, codigo);
   });
+}
+
+// ---------- consultar_manipulacion ----------
+
+export const manipulacionDto = z.object({
+  vin: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-HJ-NPR-Z0-9]{17}$/, 'El VIN tiene 17 caracteres, sin I, O ni Q'),
+  idRelacion: z.string().trim().toUpperCase().optional(),
+  especialidad: z.enum(ESPECIALIDADES),
+  sku: z.string().trim().toUpperCase().min(2).optional(),
+  excluirCodigo: z.string().trim().optional(),
+});
+
+interface FilaHistorial {
+  orden_id: number;
+  servicio_sku: string;
+  especialidad: TareaHistorial['especialidad'];
+  causa: TareaHistorial['causa'];
+  completada: boolean;
+  con_repuestos: boolean;
+  texto: string;
+  diagnosticado_en: Date;
+  reparado_en: Date | null;
+}
+
+// ¿Ya se le hizo algo a ese componente del vehículo? El concesionario lo pregunta mientras
+// valida una garantía, así que es una sola consulta a la copia local (sin llamar a nadie) y
+// no devuelve datos personales.
+export async function consultarManipulacion(datos: z.infer<typeof manipulacionDto>) {
+  const db = await bd();
+  const excluir = datos.excluirCodigo ? numeroOrden(datos.excluirCodigo) : null;
+  if (datos.excluirCodigo && !excluir) throw invalido(`excluir_codigo ${datos.excluirCodigo} no es un código de orden (OT-0001)`);
+  if (datos.idRelacion) {
+    const relacion = await db.getRepository(RelacionVehiculo).findOneBy({ idRelacion: datos.idRelacion });
+    if (relacion && relacion.vin.toUpperCase() !== datos.vin) throw invalido(`El VIN ${datos.vin} no corresponde al id_relacion ${datos.idRelacion}`);
+  }
+  const filas: FilaHistorial[] = await db.query(
+    `SELECT o.id AS orden_id, t.servicio_sku, t.especialidad, t.causa, t.completada,
+            EXISTS (SELECT 1 FROM diagnostico_repuestos dr WHERE dr.tarea_id = t.id) AS con_repuestos,
+            concat_ws(' ', t.descripcion, t.garantia_motivo, d.observaciones) AS texto,
+            coalesce(d.finalizado_en, d.creado_en) AS diagnosticado_en,
+            coalesce(r.terminada_en, r.iniciada_en) AS reparado_en
+       FROM ordenes o
+       JOIN relaciones_vehiculo rv ON rv.id_relacion = o.id_relacion
+       JOIN diagnosticos d ON d.orden_id = o.id
+       JOIN diagnostico_tareas t ON t.diagnostico_id = d.id AND t.fija = false
+       LEFT JOIN reparaciones r ON r.orden_id = o.id
+      WHERE upper(rv.vin) = $1 AND t.especialidad = $2 AND ($3::varchar IS NULL OR t.servicio_sku = $3)
+      ORDER BY o.id`,
+    [datos.vin, datos.especialidad, datos.sku ?? null],
+  );
+  const tareas: TareaHistorial[] = filas.map((f) => ({
+    codigo: codigoOrden(f.orden_id),
+    actual: f.orden_id === excluir,
+    especialidad: f.especialidad,
+    sku: f.servicio_sku,
+    causa: f.causa,
+    completada: f.completada,
+    conRepuestos: f.con_repuestos,
+    texto: f.texto ?? '',
+    fechaDiagnostico: new Date(f.diagnosticado_en),
+    fechaReparacion: f.reparado_en ? new Date(f.reparado_en) : null,
+  }));
+  const historial = historialComponente(tareas, { especialidad: datos.especialidad, sku: datos.sku }, isoColombia);
+  return {
+    vin: datos.vin,
+    especialidad: datos.especialidad,
+    sku: datos.sku ?? null,
+    excluir_codigo: excluir ? codigoOrden(excluir) : null,
+    ...historial,
+  };
 }

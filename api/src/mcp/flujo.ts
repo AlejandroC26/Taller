@@ -20,6 +20,7 @@ export const ENTRANTES = {
     'listar_ordenes',
     'consultar_diagnostico',
     'consultar_evidencias',
+    'consultar_manipulacion',
     'registrar_resultado_garantia',
   ],
   facturacion: ['consultar_cotizacion', 'registrar_respuesta_cliente', 'registrar_pago', 'estado_orden'],
