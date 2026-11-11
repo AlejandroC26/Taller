@@ -14,6 +14,7 @@ import {
   fallar,
   fallidas,
   gris,
+  guardarResultados,
   llamar,
   negrita,
   ordenDeCompra,
@@ -22,13 +23,17 @@ import {
   primeraFranja,
   revisar,
   rojo,
+  seccion,
   verde,
 } from './agentes.mjs';
 import { BASE, pedir } from './comun.mjs';
 
 const id = () => `flujo-${randomUUID()}`;
 const como = (usuario, ruta, opciones = {}) => pedir(ruta, { ...opciones, token: cuenta(usuario).web });
-const paso = (texto) => console.log(`\n${negrita(texto)}`);
+const paso = (texto) => {
+  seccion(texto);
+  console.log(`\n${negrita(texto)}`);
+};
 
 // Sube una evidencia como lo hace la web: multipart con el campo «archivo».
 async function subir(usuario, codigo, nombre, tipo, contenido, tareaId) {
@@ -179,10 +184,11 @@ try {
   revisar(!(await como('mec-frenos', '/api/ordenes?vista=mias')).json.some((o) => o.codigo === codigo && o.estado !== 'entregada'), 'ya no está abierta en Mis trabajos');
   console.log(gris(`    mano de obra realizada ${rep.mano_obra_realizada} de ${rep.mano_obra_cotizada} cotizada`));
 } catch (error) {
-  fallar();
+  fallar(error.message);
   console.error(rojo(`\n${error.message}`));
 } finally {
   await cerrarClientes();
 }
+guardarResultados('conformidad-taller-rest.csv');
 console.log(fallidas() ? rojo(`\n${fallidas()} verificación(es) fallaron.`) : verde('\nEl flujo manual pasó completo.'));
 process.exit(fallidas() ? 1 : 0);

@@ -1,0 +1,10 @@
+seccion;verificacion;resultado;detalle
+"A1. Credenciales";"MCP sin token: 401";"OK";""
+"A1. Credenciales";"MCP con un JWT inventado: 401";"OK";""
+"A1. Credenciales";"MCP con el token web (audiencia web, no mcp): 401";"OK";""
+"A2. Alcances por rol";"el mecánico no ve registrar_pago ni agendar_cita";"OK";""
+"A2. Alcances por rol";"el mecánico llama registrar_pago a la fuerza: la herramienta no existe para él";"OK";""
+"A3. Lo ajeno";"un mecánico de PL-FRENOS intenta tomar OT-0013 de PL-MOTOR: «no existe»";"OK";""
+"A4. Mensaje repetido";"el mismo id_mensaje dos veces: la misma respuesta, sin error";"OK";""
+"A4. Mensaje repetido";"otra cancelación con otro id_mensaje: rechazada, la orden ya está cancelada";"OK";""
+"A5. Prompt malicioso";"la instrucción del cliente no lo manda a una sede especializada (ruta revision_general, fuente reglas)";"OK";""

@@ -22,6 +22,7 @@ import {
   fallar,
   fallidas,
   gris,
+  guardarResultados,
   llamar,
   MECANICO_DE,
   mcp,
@@ -33,6 +34,7 @@ import {
   primeraFranja,
   revisar,
   rojo,
+  seccion,
   verde,
 } from './agentes.mjs';
 
@@ -133,6 +135,7 @@ const CASOS = {
 
 async function correrCaso(nombre) {
   const c = CASOS[nombre];
+  seccion(nombre);
   console.log(`\n${negrita(`■ ${nombre}`)} ${gris(c.descripcion)}`);
   const id = () => `${nombre}-${randomUUID()}`;
 
@@ -290,7 +293,16 @@ try {
   }
   await prepararUsuarios();
   if (comando === 'todos') {
-    for (const nombre of Object.keys(CASOS)) await correrCaso(nombre);
+    // Un caso que se rompe queda como FALLA y siguen los demás.
+    for (const nombre of Object.keys(CASOS)) {
+      try {
+        await correrCaso(nombre);
+      } catch (error) {
+        fallar(error.message);
+        console.error(rojo(`    ${error.message}`));
+      }
+    }
+    guardarResultados('conformidad-taller.csv');
   } else if (CASOS[comando]) {
     await correrCaso(comando);
   } else if (comando === 'herramientas') {

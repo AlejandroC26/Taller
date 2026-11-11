@@ -15,7 +15,7 @@ cliente responda por Telegram (`registrar_respuesta_cliente`) → si aceptó, se
 | | Facturación (grupo Zaidy) | Taller |
 |---|---|---|
 | URL | `http://10.4.16.150:3010/mcp-facturacion` | `http://10.4.16.217:3417/mcp` |
-| Token | `Bearer token_facturacion_mcp` | `Bearer` el token fijo del taller (`TALLER_MCP_TOKEN_FIJO`) |
+| Token | `Bearer` el token que facturación le entregó al taller (`MCP_FACTURACION_TOKEN`, en el `.env`) | `Bearer` el token fijo del taller (`TALLER_MCP_TOKEN_FIJO`) |
 | Salud | `GET http://10.4.16.150:3010/salud` y panel en `/panel` | — |
 
 Los equipos están en la red APRENDIZ (10.4.16.x); las IP las da el Wi‑Fi y pueden cambiar.

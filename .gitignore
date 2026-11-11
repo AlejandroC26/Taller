@@ -9,3 +9,4 @@ api/pruebas/.token-*
 api/pruebas/.usuarios-prueba.json
 api/pruebas/.usuarios-simulacion.json
 api/almacen/
+.env

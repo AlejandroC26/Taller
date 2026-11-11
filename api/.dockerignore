@@ -1,0 +1,9 @@
+node_modules
+.next
+*.tsbuildinfo
+next-env.d.ts
+.env*
+almacen
+resultados
+pruebas/.token-*
+pruebas/.usuarios-*

@@ -2,7 +2,7 @@
 // por sede), sus clientes MCP y la presentación de los resultados.
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BASE, CARPETA, pedir } from './comun.mjs';
 
@@ -13,15 +13,35 @@ export const rojo = (t) => `\x1b[31m${t}\x1b[0m`;
 export const negrita = (t) => `\x1b[1m${t}\x1b[0m`;
 export const pesos = (n) => `$${Math.round(n).toLocaleString('es-CO')}`;
 let fallas = 0;
+// Cada verificación queda registrada con su sección (el caso o el paso) para el CSV de conformidad.
+const registro = [];
+let seccionActual = '';
+export const seccion = (nombre) => {
+  seccionActual = nombre;
+};
 export const fallidas = () => fallas;
-export const fallar = () => fallas++;
+export const fallar = (texto) => {
+  fallas++;
+  if (texto) registro.push({ seccion: seccionActual, texto, ok: false, detalle: '' });
+};
 export const revisar = (condicion, texto, detalle) => {
+  registro.push({ seccion: seccionActual, texto, ok: Boolean(condicion), detalle: condicion || !detalle ? '' : JSON.stringify(detalle) });
   if (condicion) console.log(`    ${verde('✓')} ${texto}`);
   else {
     fallas++;
     console.log(`    ${rojo('✗')} ${texto}${detalle ? gris(`  ${JSON.stringify(detalle)}`) : ''}`);
   }
 };
+// Escribe las verificaciones en resultados/<archivo> (separado por punto y coma, como lo abre Excel en español).
+export function guardarResultados(archivo) {
+  const carpeta = join(CARPETA, '..', 'resultados');
+  mkdirSync(carpeta, { recursive: true });
+  const csv = (v) => `"${String(v).replace(/"/g, '""')}"`;
+  const filas = registro.map((r) => [r.seccion, r.texto, r.ok ? 'OK' : 'FALLA', r.detalle].map(csv).join(';'));
+  writeFileSync(join(carpeta, archivo), ['seccion;verificacion;resultado;detalle', ...filas].join('\n'));
+  const ok = registro.filter((r) => r.ok).length;
+  console.log(gris(`Resultados: ${ok} de ${registro.length} verificaciones correctas en resultados/${archivo}`));
+}
 
 // ---------- Usuarios y tokens (se crean una vez y se guardan en .usuarios-simulacion.json) ----------
 const ARCHIVO = join(CARPETA, '.usuarios-simulacion.json');

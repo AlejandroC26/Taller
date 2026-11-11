@@ -1,0 +1,63 @@
+# Taller Pulgas Locas en contenedores: su propia base, la API (con el MCP) y la web.
+#   copy .env.ejemplo .env      (y complete los valores)
+#   docker compose up -d --build --wait
+# El modelo local es el Ollama del equipo (LOCAL_URL apunta a host.docker.internal).
+name: taller
+
+services:
+  db:
+    image: postgres:18.6
+    environment:
+      POSTGRES_DB: taller
+      POSTGRES_USER: ${DB_USUARIO:?Defina DB_USUARIO en .env}
+      POSTGRES_PASSWORD: ${DB_CLAVE:?Defina DB_CLAVE en .env}
+      TZ: America/Bogota
+    volumes:
+      - datos:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # Sin puerto publicado: solo la API llega a la base.
+    restart: unless-stopped
+
+  # Aplica las migraciones y la semilla, y termina. La API arranca después.
+  migraciones:
+    build: ./api
+    env_file: .env
+    environment: &base
+      DB_HOST: db
+      DB_PUERTO: "5432"
+      TALLER_DB_NOMBRE: taller
+      LOCAL_URL: ${LOCAL_URL:-http://host.docker.internal:11434/v1}
+    command: sh -c "npm run migracion:correr && npm run semilla"
+    depends_on:
+      db: { condition: service_healthy }
+
+  api:
+    build: ./api
+    env_file: .env
+    environment: *base
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - evidencias:/app/almacen
+    # El MCP debe verse desde los equipos de los otros grupos en la red del aula.
+    ports:
+      - "3417:3417"
+    depends_on:
+      migraciones: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  web:
+    build: ./web
+    ports:
+      - "8080:80"
+    depends_on:
+      api: { condition: service_healthy }
+    restart: unless-stopped
+
+volumes:
+  datos:
+  evidencias:

@@ -62,6 +62,9 @@ npm run tipos                 # tsc --noEmit
 npm run simular -- todos      # los 11 casos por MCP, como un orquestador (npm run simular -- casos los lista)
 npm run flujo                 # el lado manual por REST, con los permisos
 npm run mcp                   # lista las herramientas MCP (después de node pruebas/entrar.mjs <usuario> <clave>)
+npm run evaluar               # evalúa el prediagnóstico con pruebas/casos-prediagnostico.json (-- --reglas | -- --sin-tope)
+npm run carga                 # 30 órdenes de punta a punta por MCP, 6 a la vez (npm run carga -- 60 8)
+npm run ataques               # ataques propios: credenciales, alcances, lo ajeno, id_mensaje repetido, prompt malicioso
 npm run migracion:generar -- src/base-datos/migraciones/<Nombre>   # después de cambiar una entidad
 
 # Web (desde taller/web)
@@ -69,7 +72,13 @@ npm install
 npm run dev                   # http://localhost:5173
 npm run pruebas               # pruebas unitarias de componentes y páginas
 npm run build                 # tsc + vite build
+
+# Despliegue en contenedores (desde taller): db, migraciones, api (3417) y web (8080)
+copy .env.ejemplo .env        # y complete los valores; .env no se sube
+docker compose up -d --build --wait
 ```
+
+`simular`, `flujo`, `ataques` y `carga` dejan su detalle en `api/resultados/*.csv`. Las decisiones de diseño están en `docs/adr/`.
 
 ## Mapa de carpetas
 
